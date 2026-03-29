@@ -13,11 +13,14 @@ apps/*/node_modules/
 .next/
 apps/*/.next/
 dist/
+apps/*/dist/
 build/
 .turbo/
+*.tsbuildinfo
 
 # python
 __pycache__/
+apps/api/app/**/__pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
