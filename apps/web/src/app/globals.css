@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --page-bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-hover: #eef4ff;
+  --line: #dbe3f0;
+  --text-main: #101a2c;
+  --text-muted: #64748b;
+  --brand: #2f63eb;
+  --brand-soft: #e8f0ff;
+  --green-soft: #e7f8ef;
+  --green: #16a34a;
+  --danger: #dc2626;
+  --card-shadow: 0 20px 40px rgba(15, 23, 42, 0.06);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(47, 99, 235, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(22, 163, 74, 0.08), transparent 24%),
+    var(--page-bg);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--text-main);
+  background: transparent;
+  font-family: var(--font-sans), sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
