@@ -1,0 +1,21 @@
+serverAddr = "49.232.143.230"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "tokenmall-frp-20260326"
+
+transport.tcpMux = true
+
+[[proxies]]
+name = "tokenmall-web"
+type = "tcp"
+localIP = "localhost"
+localPort = 3000
+remotePort = 13000
+
+[[proxies]]
+name = "kaoshi-web"
+type = "tcp"
+localIP = "localhost"
+localPort = 6670
+remotePort = 6670

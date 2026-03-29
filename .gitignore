@@ -1,0 +1,49 @@
+# environment
+.env
+.env.local
+.env.*.local
+apps/api/.env
+apps/web/.env.local
+
+# dependencies
+node_modules/
+apps/*/node_modules/
+
+# build output
+.next/
+apps/*/.next/
+dist/
+build/
+.turbo/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+apps/api/.venv/
+
+# logs
+*.log
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/
+
+# secrets / certs
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+
+# local tool state
+.claude/

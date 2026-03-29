@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: tokenmall-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tokenmall
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: tokenmall-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: tokenmall-litellm
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      BAILIAN_API_KEY: ${BAILIAN_API_KEY}
+      OPENAI_API_KEY: ${BAILIAN_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-tokenmall-master}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      LITELLM_CONFIG: /app/config.yaml
+      LITELLM_ENABLE_ADMIN_API: "true"
+      STORE_MODEL_IN_DB: "true"
+    volumes:
+      - ../../apps/proxy/config.yaml:/app/config.yaml
+    command: ["--port", "4000", "--config", "/app/config.yaml"]
+    depends_on:
+      - postgres
+
+  api:
+    build:
+      context: ../../apps/api
+    container_name: tokenmall-api
+    restart: always
+    environment:
+      APP_ENV: development
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/tokenmall
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-tokenmall-master}
+      BAILIAN_API_KEY: ${BAILIAN_API_KEY}
+      BAILIAN_API_BASE: ${BAILIAN_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      CORS_ORIGINS: http://localhost:3000
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tokenmall.dev}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123456}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - litellm
+
+  web:
+    build:
+      context: ../../apps/web
+    container_name: tokenmall-web
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

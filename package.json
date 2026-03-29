@@ -1,0 +1,15 @@
+{
+  "name": "tokenmall",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TokenMall local development helpers",
+  "scripts": {
+    "dev:deps": "cd infra/docker && docker compose -f docker-compose.dev.yml --env-file ../../.env up -d",
+    "dev:deps:down": "cd infra/docker && docker compose -f docker-compose.dev.yml down",
+    "dev:web": "pnpm --dir apps/web dev",
+    "lint:web": "pnpm --dir apps/web lint",
+    "typecheck:web": "pnpm --dir apps/web exec tsc --noEmit",
+    "dev:api": "cd apps/api && sh -c 'if [ -x .venv/bin/uvicorn ]; then .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000; else echo \"Missing apps/api/.venv. Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt\"; exit 1; fi'"
+  },
+  "packageManager": "pnpm@10.28.2"
+}
