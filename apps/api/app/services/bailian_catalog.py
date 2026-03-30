@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import settings
 from app.models import BailianModelCache, ModelCatalog
+from app.services.official_model_catalog import get_official_model_metadata
 
 
 PROVIDER_LABEL_MAP = {
@@ -22,46 +23,6 @@ PROVIDER_LABEL_MAP = {
     "deepseek": ("deepseek", "DeepSeek"),
     "moonshot": ("moonshot", "Moonshot"),
     "glm": ("glm", "智谱"),
-}
-
-
-PRICE_OVERRIDES: dict[str, dict[str, Decimal | str]] = {
-    "qwen-plus": {
-        "input_price_per_million": Decimal("2.5000"),
-        "output_price_per_million": Decimal("5.0000"),
-        "price_source": "preset",
-        "description": "通用高质量文本模型，适合对话、工具调用与复杂任务。",
-        "tags": "多轮对话,工具调用,高质量",
-    },
-    "qwen-turbo": {
-        "input_price_per_million": Decimal("1.5000"),
-        "output_price_per_million": Decimal("3.0000"),
-        "price_source": "preset",
-        "description": "高性价比文本模型，适合高并发与快速响应场景。",
-        "tags": "高并发,快速响应,低成本",
-    },
-    "qwen-max-latest": {
-        "input_price_per_million": Decimal("12.0000"),
-        "output_price_per_million": Decimal("36.0000"),
-        "price_source": "preset",
-        "description": "旗舰文本模型，适合复杂推理、长文本和高级生成任务。",
-        "tags": "复杂推理,旗舰模型,长文本",
-    },
-    "qwen-image-2.0": {
-        "price_source": "preset",
-        "description": "图像生成模型，适合文生图和创意设计场景。",
-        "tags": "文生图,创意设计,图像生成",
-    },
-    "qwen-image-2.0-pro": {
-        "price_source": "preset",
-        "description": "高质量图像生成模型，适合商业级视觉内容生成。",
-        "tags": "高质量图像,商业设计,图像生成",
-    },
-    "text-embedding-v3": {
-        "price_source": "preset",
-        "description": "通用向量嵌入模型，适合检索、召回和知识库向量化。",
-        "tags": "向量,检索,RAG",
-    },
 }
 
 
@@ -108,28 +69,30 @@ def build_cache_payload(raw_item: dict) -> dict:
     provider, provider_display_name = infer_provider(upstream_model_id)
     capability_type, category = infer_capability(upstream_model_id)
     base_model_id = upstream_model_id.split("/", 1)[-1]
-    override = PRICE_OVERRIDES.get(base_model_id, {})
-    display_name = prettify_display_name(upstream_model_id)
+    official_metadata = get_official_model_metadata(base_model_id) or {}
+    display_name = str(official_metadata.get("display_name") or prettify_display_name(upstream_model_id))
     return {
         "upstream_model_id": upstream_model_id,
-        "provider": provider,
-        "provider_display_name": provider_display_name,
+        "provider": str(official_metadata.get("provider") or provider),
+        "provider_display_name": str(official_metadata.get("vendor_display_name") or provider_display_name),
         "display_name": display_name,
         "model_code": normalize_platform_model_code(base_model_id),
-        "category": category,
-        "capability_type": capability_type,
-        "description": str(override.get("description") or ""),
-        "support_features": {
+        "category": str(official_metadata.get("category") or category),
+        "capability_type": str(official_metadata.get("capability_type") or capability_type),
+        "description": str(official_metadata.get("description") or ""),
+        "support_features": str(official_metadata.get("support_features") or {
             "chat": "多轮对话,知识问答,工具调用",
             "image": "图像生成,创意设计,高质量输出",
             "embedding": "向量检索,知识库召回,文本嵌入",
             "audio": "语音合成,语音识别,音频处理",
             "video": "视频生成,多模态理解",
-        }.get(capability_type, ""),
-        "tags": str(override.get("tags") or ""),
-        "input_price_per_million": override.get("input_price_per_million"),
-        "output_price_per_million": override.get("output_price_per_million"),
-        "price_source": str(override.get("price_source") or "unknown"),
+        }.get(capability_type, "")),
+        "tags": str(official_metadata.get("tags") or ""),
+        "billing_mode": str(official_metadata.get("billing_mode") or "token"),
+        "pricing_items": str(official_metadata.get("pricing_items") or "[]"),
+        "input_price_per_million": official_metadata.get("input_price_per_million"),
+        "output_price_per_million": official_metadata.get("output_price_per_million"),
+        "price_source": str(official_metadata.get("price_source") or "unknown"),
         "owned_by": str(raw_item.get("owned_by") or ""),
         "raw_payload": json.dumps(raw_item, ensure_ascii=False),
         "is_available": True,
@@ -190,6 +153,8 @@ def import_bailian_models(db, upstream_ids: list[str]) -> list[ModelCatalog]:
             existing.display_name = row.display_name
             existing.vendor_display_name = row.provider_display_name
             existing.category = row.category
+            existing.billing_mode = row.billing_mode or "token"
+            existing.pricing_items = row.pricing_items or "[]"
             if row.input_price_per_million is not None:
                 existing.input_price_per_million = row.input_price_per_million
             if row.output_price_per_million is not None:
@@ -213,6 +178,8 @@ def import_bailian_models(db, upstream_ids: list[str]) -> list[ModelCatalog]:
             display_name=row.display_name,
             vendor_display_name=row.provider_display_name,
             category=row.category,
+            billing_mode=row.billing_mode or "token",
+            pricing_items=row.pricing_items or "[]",
             input_price_per_million=row.input_price_per_million or Decimal("0.0000"),
             output_price_per_million=row.output_price_per_million or Decimal("0.0000"),
             price_source=row.price_source or "imported",
@@ -245,6 +212,12 @@ def sync_prices_from_bailian_cache(db) -> int:
         if not model:
             continue
         changed = False
+        if model.billing_mode != (cache_row.billing_mode or "token"):
+            model.billing_mode = cache_row.billing_mode or "token"
+            changed = True
+        if (model.pricing_items or "[]") != (cache_row.pricing_items or "[]"):
+            model.pricing_items = cache_row.pricing_items or "[]"
+            changed = True
         if cache_row.input_price_per_million is not None and model.input_price_per_million != cache_row.input_price_per_million:
             model.input_price_per_million = cache_row.input_price_per_million
             changed = True

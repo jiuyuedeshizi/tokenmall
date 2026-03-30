@@ -22,6 +22,8 @@ def get_model_or_404(model_code: str, db: Session) -> ModelCatalog:
 
 
 def calculate_usage_cost(model: ModelCatalog, prompt_tokens: int, completion_tokens: int) -> Decimal:
+    if (model.billing_mode or "token") != "token":
+        return Decimal("0.0000")
     input_cost = (Decimal(prompt_tokens) / Decimal("1000000")) * Decimal(model.input_price_per_million)
     output_cost = (Decimal(completion_tokens) / Decimal("1000000")) * Decimal(model.output_price_per_million)
     return (input_cost + output_cost).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)

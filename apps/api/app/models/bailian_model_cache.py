@@ -18,6 +18,8 @@ class BailianModelCache(Base):
     model_code: Mapped[str] = mapped_column(String(120), nullable=False)
     category: Mapped[str] = mapped_column(String(32), nullable=False, default="text")
     capability_type: Mapped[str] = mapped_column(String(32), nullable=False, default="chat")
+    billing_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="token")
+    pricing_items: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     support_features: Mapped[str] = mapped_column(Text, default="", nullable=False)
     tags: Mapped[str] = mapped_column(Text, default="", nullable=False)

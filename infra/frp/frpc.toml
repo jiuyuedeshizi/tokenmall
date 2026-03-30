@@ -9,13 +9,13 @@ transport.tcpMux = true
 [[proxies]]
 name = "tokenmall-web"
 type = "tcp"
-localIP = "localhost"
+localIP = "127.0.0.1"
 localPort = 3000
 remotePort = 13000
 
 [[proxies]]
 name = "kaoshi-web"
 type = "tcp"
-localIP = "localhost"
+localIP = "127.0.0.1"
 localPort = 6670
 remotePort = 6670

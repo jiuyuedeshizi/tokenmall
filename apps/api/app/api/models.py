@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import json
 
 from app.db.session import get_db
 from app.models import ModelCatalog
@@ -10,6 +11,26 @@ router = APIRouter()
 
 def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_pricing_items(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def ensure_pricing_items(row: ModelCatalog) -> list[dict]:
+    items = parse_pricing_items(row.pricing_items)
+    if items:
+        return items
+    return [
+        {"label": "输入", "unit": "元/百万Token", "price": str(row.input_price_per_million)},
+        {"label": "输出", "unit": "元/百万Token", "price": str(row.output_price_per_million)},
+    ]
 
 
 def serialize_model(row: ModelCatalog):
@@ -23,6 +44,8 @@ def serialize_model(row: ModelCatalog):
         "capability_type": row.capability_type,
         "display_name": row.display_name,
         "category": row.category,
+        "billing_mode": row.billing_mode,
+        "pricing_items": ensure_pricing_items(row),
         "input_price_per_million": row.input_price_per_million,
         "output_price_per_million": row.output_price_per_million,
         "price_source": row.price_source,

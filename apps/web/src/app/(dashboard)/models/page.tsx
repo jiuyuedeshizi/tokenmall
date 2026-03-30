@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Panel } from "@/components/panel";
 import { apiFetch } from "@/lib/api";
-import type { ModelInfo } from "@/types";
+import type { ModelInfo, PricingItem } from "@/types";
 
 const categoryOptions = [
   { label: "全部", value: "all" },
@@ -43,10 +43,24 @@ function categoryLabel(category: string) {
   return "文本模型";
 }
 
-function formatPrice(value: string) {
-  return Number(value).toLocaleString("zh-CN", {
-    maximumFractionDigits: 2,
-  });
+function renderPricingSummary(items: PricingItem[]) {
+  if (!items.length) {
+    return ["价格待补充"];
+  }
+  return items.map((item) => `${item.label}: ¥${item.price}/${item.unit}`);
+}
+
+function formatBillingMode(value: string) {
+  switch (value) {
+    case "per_image":
+      return "按张计费";
+    case "per_second":
+      return "按秒计费";
+    case "per_10k_chars":
+      return "按万字符计费";
+    default:
+      return "按Token计费";
+  }
 }
 
 function ModelIcon() {
@@ -159,12 +173,14 @@ export default function ModelsPage() {
                 {item.description}
               </p>
 
-              <div className="mt-5 space-y-2 text-[18px] font-semibold">
-                <div className="text-[#315efb]">
-                  输入: ¥{formatPrice(item.input_price_per_million)}/百万Token
-                </div>
-                <div className="text-[#16a34a]">
-                  输出: ¥{formatPrice(item.output_price_per_million)}/百万Token
+              <div className="mt-5">
+                <div className="text-[14px] font-semibold text-[#667085]">{formatBillingMode(item.billing_mode)}</div>
+                <div className="mt-2 space-y-2 text-[17px] font-semibold">
+                  {renderPricingSummary(item.pricing_items).slice(0, 3).map((line, index) => (
+                    <div key={`${item.model_code}-${index}`} className={index === 0 ? "text-[#315efb]" : "text-[#16a34a]"}>
+                      {line}
+                    </div>
+                  ))}
                 </div>
               </div>
 

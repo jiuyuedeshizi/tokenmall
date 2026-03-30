@@ -6,18 +6,20 @@ import { AuthGuard } from "@/components/auth-guard";
 import { AdminShell } from "@/components/admin-shell";
 import { Panel } from "@/components/panel";
 import { apiFetch } from "@/lib/api";
-import type { AdminModel, BailianCatalogItem, ModelPriceSnapshot, PaginatedResponse } from "@/types";
+import type { AdminModel, BailianCatalogItem, ModelPriceSnapshot, PaginatedResponse, PricingItem } from "@/types";
 
 const initialForm = {
   provider: "alibaba-bailian",
   model_code: "",
   model_id: "",
   capability_type: "chat",
+  billing_mode: "token",
   display_name: "",
   vendor_display_name: "Alibaba",
   category: "text",
   input_price_per_million: "2.5",
   output_price_per_million: "5",
+  pricing_items_json: "",
   rating: "4.8",
   description: "",
   hero_description: "",
@@ -61,6 +63,13 @@ const capabilityOptions = [
   { label: "视频能力", value: "video" },
 ];
 
+const billingModeOptions = [
+  { label: "按 Token 计费", value: "token" },
+  { label: "按张计费", value: "per_image" },
+  { label: "按秒计费", value: "per_second" },
+  { label: "按万字符计费", value: "per_10k_chars" },
+];
+
 const formFields = [
   { key: "display_name", label: "模型名称", type: "input", placeholder: "例如：Qwen3.5 27B" },
   { key: "vendor_display_name", label: "提供商名称", type: "input", placeholder: "例如：Alibaba" },
@@ -68,9 +77,11 @@ const formFields = [
   { key: "model_code", label: "平台模型编码", type: "input", placeholder: "例如：qwen-plus" },
   { key: "model_id", label: "真实模型 ID", type: "input", placeholder: "例如：qwen-plus" },
   { key: "capability_type", label: "能力类型", type: "select" },
+  { key: "billing_mode", label: "计费模式", type: "select" },
   { key: "category", label: "模型分类", type: "select" },
   { key: "input_price_per_million", label: "输入价格（每百万Token）", type: "input", placeholder: "例如：2.5" },
   { key: "output_price_per_million", label: "输出价格（每百万Token）", type: "input", placeholder: "例如：5" },
+  { key: "pricing_items_json", label: "价格项配置", type: "textarea", placeholder: '例如：[{"label":"输入","unit":"元/百万Token","price":"0.8"}]' },
   { key: "rating", label: "评分", type: "input", placeholder: "例如：4.8" },
   { key: "description", label: "卡片简介", type: "textarea", placeholder: "用于模型库列表展示" },
   { key: "hero_description", label: "详情介绍", type: "textarea", placeholder: "用于模型详情页顶部介绍" },
@@ -100,6 +111,10 @@ function formatCapability(value: string) {
   return capabilityOptions.find((item) => item.value === value)?.label ?? value;
 }
 
+function formatBillingMode(value: string) {
+  return billingModeOptions.find((item) => item.value === value)?.label ?? value;
+}
+
 function formatSyncStatus(value?: string) {
   switch (value) {
     case "ready":
@@ -117,6 +132,8 @@ function formatSyncStatus(value?: string) {
 
 function formatPriceSource(value?: string) {
   switch (value) {
+    case "official_doc":
+      return "官方文档";
     case "seed":
       return "系统预置";
     case "preset":
@@ -140,6 +157,33 @@ function buildLitellmPreview(provider: string, modelId: string) {
   }
   const prefix = providerPrefixMap[provider] ?? provider;
   return `${prefix}/${normalizedModelId}`;
+}
+
+function parsePricingItemsInput(value: string): PricingItem[] {
+  const content = value.trim();
+  if (!content) {
+    return [];
+  }
+  const parsed = JSON.parse(content);
+  if (!Array.isArray(parsed)) {
+    throw new Error("价格项配置必须是数组 JSON");
+  }
+  return parsed.map((item) => ({
+    label: String(item.label ?? "").trim(),
+    unit: String(item.unit ?? "").trim(),
+    price: String(item.price ?? "").trim(),
+  })).filter((item) => item.label && item.unit && item.price);
+}
+
+function stringifyPricingItems(items: PricingItem[]) {
+  return items.length ? JSON.stringify(items, null, 2) : "";
+}
+
+function renderPricingSummary(items: PricingItem[]) {
+  if (!items.length) {
+    return ["暂无价格项"];
+  }
+  return items.map((item) => `${item.label}：¥${item.price}/${item.unit}`);
 }
 
 export default function AdminModelsPage() {
@@ -242,11 +286,13 @@ export default function AdminModelsPage() {
       model_code: item.model_code,
       model_id: item.model_id,
       capability_type: item.capability_type,
+      billing_mode: item.billing_mode,
       display_name: item.display_name,
       vendor_display_name: item.vendor_display_name,
       category: item.category,
       input_price_per_million: item.input_price_per_million,
       output_price_per_million: item.output_price_per_million,
+      pricing_items_json: stringifyPricingItems(item.pricing_items),
       rating: String(item.rating),
       description: item.description,
       hero_description: item.hero_description,
@@ -268,19 +314,19 @@ export default function AdminModelsPage() {
 
   async function handleSubmit() {
     setSubmitting(true);
-    const payload = {
-      ...form,
-      input_price_per_million: Number(form.input_price_per_million),
-      output_price_per_million: Number(form.output_price_per_million),
-      rating: Number(form.rating),
-      support_features: normalizeCsv(form.support_features),
-      tags: normalizeCsv(form.tags),
-      example_python: form.example_python,
-      example_typescript: form.example_typescript,
-      example_curl: form.example_curl,
-    };
-
     try {
+      const payload = {
+        ...form,
+        input_price_per_million: Number(form.input_price_per_million),
+        output_price_per_million: Number(form.output_price_per_million),
+        pricing_items: parsePricingItemsInput(form.pricing_items_json),
+        rating: Number(form.rating),
+        support_features: normalizeCsv(form.support_features),
+        tags: normalizeCsv(form.tags),
+        example_python: form.example_python,
+        example_typescript: form.example_typescript,
+        example_curl: form.example_curl,
+      };
       if (editingId) {
         await apiFetch(`/admin/models/${editingId}`, {
           method: "PATCH",
@@ -428,14 +474,15 @@ export default function AdminModelsPage() {
                     </div>
 
                     <div className="text-right">
-                      <div className="text-[15px] font-semibold text-[#172033]">
-                        输入 ¥{item.input_price_per_million}
-                      </div>
-                      <div className="mt-1 text-[15px] font-semibold text-[#16a34a]">
-                        输出 ¥{item.output_price_per_million}
+                      <div className="space-y-1 text-[14px] font-semibold">
+                        {renderPricingSummary(item.pricing_items).slice(0, 2).map((line, index) => (
+                          <div key={`${item.id}-${index}`} className={index === 0 ? "text-[#172033]" : "text-[#16a34a]"}>
+                            {line}
+                          </div>
+                        ))}
                       </div>
                       <div className="mt-2 text-[14px] text-[#667085]">
-                        {item.is_active ? "已启用" : "已停用"} · {formatCategory(item.category)} · {formatCapability(item.capability_type)} · {formatProvider(item.provider)}
+                        {item.is_active ? "已启用" : "已停用"} · {formatCategory(item.category)} · {formatCapability(item.capability_type)} · {formatBillingMode(item.billing_mode)} · {formatProvider(item.provider)}
                       </div>
                       <div className="mt-2 text-[13px] text-[#98a2b3]">
                         LiteLLM：{item.litellm_model_name || buildLitellmPreview(item.provider, item.model_id)}
@@ -463,6 +510,13 @@ export default function AdminModelsPage() {
                   </div>
 
                   <p className="mt-4 text-[15px] leading-7 text-[#4d596a]">{item.hero_description}</p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {renderPricingSummary(item.pricing_items).map((line) => (
+                      <div key={line} className="rounded-[16px] bg-[#f7f9fc] px-4 py-3 text-[13px] text-[#4d596a]">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
                   {item.sync_error ? (
                     <div className="mt-4 rounded-[16px] border border-[#ffd6d6] bg-[#fff8f8] px-4 py-3 text-[13px] leading-6 text-[#c2410c]">
                       最近探活结果：{item.sync_error}
@@ -607,6 +661,8 @@ export default function AdminModelsPage() {
                             ? providerOptions
                             : field.key === "capability_type"
                               ? capabilityOptions
+                              : field.key === "billing_mode"
+                                ? billingModeOptions
                               : categoryOptions
                           ).map((option) => (
                             <option key={option.value} value={option.value}>
@@ -633,6 +689,16 @@ export default function AdminModelsPage() {
                       {field.key === "capability_type" ? (
                         <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
                           能力类型决定模型探活和调用入口。对话会走 <span className="font-semibold text-[#172033]">chat/completions</span>，图像会走 <span className="font-semibold text-[#172033]">images/generations</span>，向量会走 <span className="font-semibold text-[#172033]">embeddings</span>。
+                        </div>
+                      ) : null}
+                      {field.key === "billing_mode" ? (
+                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
+                          计费模式用于前后台展示和后续扩展计费器。文本模型优先选择 <span className="font-semibold text-[#172033]">按 Token 计费</span>。
+                        </div>
+                      ) : null}
+                      {field.key === "pricing_items_json" ? (
+                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
+                          这里填写价格项数组 JSON，用于展示文档中的详细价格，例如输入/输出、按张或按秒等计费项。
                         </div>
                       ) : null}
                     </label>
@@ -760,13 +826,15 @@ export default function AdminModelsPage() {
                           <p className="mt-4 min-h-[44px] text-[14px] leading-6 text-[#4d596a]">
                             {item.description || "该模型来自百炼账号可见列表，暂无更详细说明。"}
                           </p>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                            <div className="rounded-[16px] bg-[#f7f9fc] px-4 py-3 text-[13px] text-[#667085]">
-                              输入价格：{item.input_price_per_million ?? "待补充"}
-                            </div>
-                            <div className="rounded-[16px] bg-[#f7f9fc] px-4 py-3 text-[13px] text-[#667085]">
-                              输出价格：{item.output_price_per_million ?? "待补充"}
-                            </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-[12px] text-[#315efb]">
+                              {formatBillingMode(item.billing_mode)}
+                            </span>
+                            {renderPricingSummary(item.pricing_items).map((line) => (
+                              <span key={line} className="rounded-full bg-[#f7f9fc] px-3 py-1 text-[12px] text-[#4d596a]">
+                                {line}
+                              </span>
+                            ))}
                           </div>
                         </button>
                       );
@@ -838,15 +906,15 @@ export default function AdminModelsPage() {
                     <div key={item.id} className="rounded-[20px] border border-[#dbe3ef] bg-white px-5 py-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <div className="text-[15px] font-semibold text-[#172033]">
-                            输入 ¥{item.input_price_per_million} / 输出 ¥{item.output_price_per_million}
-                          </div>
+                          <div className="text-[15px] font-semibold text-[#172033]">{formatBillingMode(priceHistoryModel.billing_mode)}</div>
                           <div className="mt-2 text-[13px] text-[#667085]">
                             来源：{formatPriceSource(item.price_source)} · {new Date(item.created_at).toLocaleString("zh-CN")}
                           </div>
                         </div>
                       </div>
-                      <div className="mt-3 text-[13px] leading-6 text-[#4d596a]">{item.note || "无备注"}</div>
+                      <div className="mt-3 text-[13px] leading-6 text-[#4d596a]">
+                        输入 ¥{item.input_price_per_million} / 输出 ¥{item.output_price_per_million} · {item.note || "无备注"}
+                      </div>
                     </div>
                   ))}
                   {priceHistoryLoading ? <div className="text-[14px] text-[#667085]">加载中...</div> : null}

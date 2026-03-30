@@ -19,9 +19,11 @@ MODEL_SEEDS = [
         "display_name": "Qwen3.5 27B",
         "vendor_display_name": "Alibaba",
         "category": "text",
-        "input_price_per_million": Decimal("2.50"),
-        "output_price_per_million": Decimal("5.00"),
-        "price_source": "seed",
+        "billing_mode": "token",
+        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"0.8"},{"label":"输出","unit":"元/百万Token","price":"4.8"}]',
+        "input_price_per_million": Decimal("0.80"),
+        "output_price_per_million": Decimal("4.80"),
+        "price_source": "official_doc",
         "last_price_synced_at": datetime.now(timezone.utc),
         "description": "强大的多模态AI模型，支持文本和图像处理",
         "hero_description": "强大的多模态AI模型，支持文本和图像处理",
@@ -40,6 +42,8 @@ MODEL_SEEDS = [
         "display_name": "Qwen Turbo",
         "vendor_display_name": "Alibaba",
         "category": "text",
+        "billing_mode": "token",
+        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"1.5"},{"label":"输出","unit":"元/百万Token","price":"3"}]',
         "input_price_per_million": Decimal("1.50"),
         "output_price_per_million": Decimal("3.00"),
         "price_source": "seed",
@@ -61,6 +65,8 @@ MODEL_SEEDS = [
         "display_name": "Qwen Max",
         "vendor_display_name": "Alibaba",
         "category": "text",
+        "billing_mode": "token",
+        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"12"},{"label":"输出","unit":"元/百万Token","price":"36"}]',
         "input_price_per_million": Decimal("12.00"),
         "output_price_per_million": Decimal("36.00"),
         "price_source": "seed",
@@ -88,6 +94,8 @@ def seed_models(db: Session):
             existing.provider = item["provider"]
             existing.display_name = item["display_name"]
             existing.category = item["category"]
+            existing.billing_mode = item["billing_mode"]
+            existing.pricing_items = item["pricing_items"]
             existing.input_price_per_million = item["input_price_per_million"]
             existing.output_price_per_million = item["output_price_per_million"]
             existing.price_source = item["price_source"]
@@ -187,6 +195,12 @@ def initialize_database():
         if "price_source" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN price_source VARCHAR(32) NOT NULL DEFAULT 'manual'"))
             db.commit()
+        if "billing_mode" not in model_columns:
+            db.execute(text("ALTER TABLE model_catalog ADD COLUMN billing_mode VARCHAR(32) NOT NULL DEFAULT 'token'"))
+            db.commit()
+        if "pricing_items" not in model_columns:
+            db.execute(text("ALTER TABLE model_catalog ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
+            db.commit()
         if "last_price_synced_at" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN last_price_synced_at TIMESTAMP WITH TIME ZONE"))
             db.commit()
@@ -216,6 +230,13 @@ def initialize_database():
             db.commit()
         if "sync_error" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN sync_error TEXT NOT NULL DEFAULT ''"))
+            db.commit()
+        bailian_cache_columns = {column["name"] for column in inspector.get_columns("bailian_model_cache")}
+        if "billing_mode" not in bailian_cache_columns:
+            db.execute(text("ALTER TABLE bailian_model_cache ADD COLUMN billing_mode VARCHAR(32) NOT NULL DEFAULT 'token'"))
+            db.commit()
+        if "pricing_items" not in bailian_cache_columns:
+            db.execute(text("ALTER TABLE bailian_model_cache ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
             db.commit()
         usage_log_columns = {column["name"] for column in inspector.get_columns("usage_logs")}
         if "response_time_ms" not in usage_log_columns:

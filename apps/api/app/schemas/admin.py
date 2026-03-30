@@ -46,6 +46,7 @@ class CreateModelRequest(BaseModel):
     model_code: str
     model_id: str = Field(min_length=2, max_length=160)
     capability_type: str = Field(default="chat", min_length=2, max_length=32)
+    billing_mode: str = Field(default="token", min_length=2, max_length=32)
     display_name: str = Field(min_length=2, max_length=120)
     vendor_display_name: str = Field(min_length=2, max_length=120)
     category: str = Field(min_length=2, max_length=32)
@@ -56,6 +57,7 @@ class CreateModelRequest(BaseModel):
     hero_description: str = Field(default="", max_length=2000)
     support_features: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    pricing_items: list[dict[str, str]] = Field(default_factory=list)
     example_python: str = Field(default="", max_length=10000)
     example_typescript: str = Field(default="", max_length=10000)
     example_curl: str = Field(default="", max_length=10000)
@@ -75,12 +77,22 @@ class CreateModelRequest(BaseModel):
             raise ValueError("模型能力类型仅支持 chat、image、embedding、audio、video")
         return normalized
 
+    @field_validator("billing_mode", mode="before")
+    @classmethod
+    def validate_billing_mode(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        allowed = {"token", "per_image", "per_second", "per_10k_chars"}
+        if normalized not in allowed:
+            raise ValueError("计费模式仅支持 token、per_image、per_second、per_10k_chars")
+        return normalized
+
 
 class UpdateModelRequest(BaseModel):
     provider: str | None = Field(default=None, min_length=2, max_length=64)
     model_code: str | None = None
     model_id: str | None = Field(default=None, min_length=2, max_length=160)
     capability_type: str | None = Field(default=None, min_length=2, max_length=32)
+    billing_mode: str | None = Field(default=None, min_length=2, max_length=32)
     display_name: str | None = Field(default=None, min_length=2, max_length=120)
     vendor_display_name: str | None = Field(default=None, min_length=2, max_length=120)
     category: str | None = Field(default=None, min_length=2, max_length=32)
@@ -91,6 +103,7 @@ class UpdateModelRequest(BaseModel):
     hero_description: str | None = Field(default=None, max_length=2000)
     support_features: list[str] | None = None
     tags: list[str] | None = None
+    pricing_items: list[dict[str, str]] | None = None
     example_python: str | None = Field(default=None, max_length=10000)
     example_typescript: str | None = Field(default=None, max_length=10000)
     example_curl: str | None = Field(default=None, max_length=10000)
@@ -112,4 +125,15 @@ class UpdateModelRequest(BaseModel):
         allowed = {"chat", "image", "embedding", "audio", "video"}
         if normalized not in allowed:
             raise ValueError("模型能力类型仅支持 chat、image、embedding、audio、video")
+        return normalized
+
+    @field_validator("billing_mode", mode="before")
+    @classmethod
+    def validate_optional_billing_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = (value or "").strip().lower()
+        allowed = {"token", "per_image", "per_second", "per_10k_chars"}
+        if normalized not in allowed:
+            raise ValueError("计费模式仅支持 token、per_image、per_second、per_10k_chars")
         return normalized

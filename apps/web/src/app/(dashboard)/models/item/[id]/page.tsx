@@ -6,12 +6,41 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
-import type { ModelInfo } from "@/types";
+import type { ModelInfo, PricingItem } from "@/types";
 
 function formatPrice(value: string) {
+  if (!value || Number.isNaN(Number(value))) {
+    return value;
+  }
   return Number(value).toLocaleString("zh-CN", {
     maximumFractionDigits: 2,
   });
+}
+
+function formatBillingMode(value: string) {
+  switch (value) {
+    case "per_image":
+      return "按张计费";
+    case "per_second":
+      return "按秒计费";
+    case "per_10k_chars":
+      return "按万字符计费";
+    default:
+      return "按Token计费";
+  }
+}
+
+function pricingCardTint(index: number) {
+  return index % 2 === 0
+    ? { bg: "bg-[#eef4ff]", text: "text-[#315efb]" }
+    : { bg: "bg-[#edf9f0]", text: "text-[#16a34a]" };
+}
+
+function renderPricingSummary(items: PricingItem[]) {
+  if (!items.length) {
+    return [{ label: "价格待补充", unit: "", price: "-" }];
+  }
+  return items;
 }
 
 function ModelIcon() {
@@ -220,19 +249,16 @@ console.log(data);`;
 
           <section className="rounded-[22px] border border-[#e5eaf3] bg-white p-8">
             <h2 className="text-[22px] font-semibold text-[#172033]">价格信息</h2>
+            <div className="mt-3 text-[15px] text-[#667085]">{formatBillingMode(item.billing_mode)}</div>
             <div className="mt-7 grid gap-5 md:grid-cols-2">
-              <div className="rounded-[18px] bg-[#eef4ff] p-6">
-                <div className="text-[16px] text-[#4d596a]">输入价格</div>
-                <div className="mt-4 text-[28px] font-semibold text-[#315efb]">
-                  ¥{formatPrice(item.input_price_per_million)}/百万Token
+              {renderPricingSummary(item.pricing_items).map((pricingItem, index) => (
+                <div key={`${pricingItem.label}-${index}`} className={`rounded-[18px] p-6 ${pricingCardTint(index).bg}`}>
+                  <div className="text-[16px] text-[#4d596a]">{pricingItem.label}</div>
+                  <div className={`mt-4 text-[28px] font-semibold ${pricingCardTint(index).text}`}>
+                    ¥{formatPrice(pricingItem.price)}/{pricingItem.unit}
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-[18px] bg-[#edf9f0] p-6">
-                <div className="text-[16px] text-[#4d596a]">输出价格</div>
-                <div className="mt-4 text-[28px] font-semibold text-[#16a34a]">
-                  ¥{formatPrice(item.output_price_per_million)}/百万Token
-                </div>
-              </div>
+              ))}
             </div>
           </section>
 

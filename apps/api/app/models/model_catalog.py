@@ -18,6 +18,8 @@ class ModelCatalog(Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     vendor_display_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     category: Mapped[str] = mapped_column(String(32), nullable=False)
+    billing_mode: Mapped[str] = mapped_column(String(32), default="token", nullable=False)
+    pricing_items: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     input_price_per_million: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     output_price_per_million: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     price_source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)

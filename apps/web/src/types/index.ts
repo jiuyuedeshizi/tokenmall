@@ -93,6 +93,12 @@ export type UsageHistoryResponse = {
   page_size: number;
 };
 
+export type PricingItem = {
+  label: string;
+  unit: string;
+  price: string;
+};
+
 export type PaginatedResponse<T> = {
   items: T[];
   total: number;
@@ -126,6 +132,8 @@ export type ModelInfo = {
   capability_type: string;
   display_name: string;
   category: string;
+  billing_mode: string;
+  pricing_items: PricingItem[];
   input_price_per_million: string;
   output_price_per_million: string;
   price_source?: string;
@@ -224,6 +232,8 @@ export type BailianCatalogItem = {
   model_code: string;
   category: string;
   capability_type: string;
+  billing_mode: string;
+  pricing_items: PricingItem[];
   description: string;
   support_features: string[];
   tags: string[];

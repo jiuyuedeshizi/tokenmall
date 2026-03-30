@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -21,6 +22,53 @@ from app.services.wallet import apply_balance_change, mark_order_paid
 router = APIRouter()
 
 
+def parse_pricing_items(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def ensure_model_pricing_items(model: ModelCatalog) -> list[dict]:
+    items = parse_pricing_items(model.pricing_items)
+    if items:
+        return items
+    return [
+        {"label": "输入", "unit": "元/百万Token", "price": str(model.input_price_per_million)},
+        {"label": "输出", "unit": "元/百万Token", "price": str(model.output_price_per_million)},
+    ]
+
+
+def ensure_cache_pricing_items(row: BailianModelCache) -> list[dict]:
+    items = parse_pricing_items(row.pricing_items)
+    if items:
+        return items
+    fallback = []
+    if row.input_price_per_million is not None:
+        fallback.append({"label": "输入", "unit": "元/百万Token", "price": str(row.input_price_per_million)})
+    if row.output_price_per_million is not None:
+        fallback.append({"label": "输出", "unit": "元/百万Token", "price": str(row.output_price_per_million)})
+    return fallback
+
+
+def build_default_pricing_items(input_price: Decimal, output_price: Decimal, billing_mode: str = "token") -> str:
+    if billing_mode == "per_image":
+        items = [{"label": "图片生成", "unit": "元/张", "price": str(output_price.normalize())}]
+    elif billing_mode == "per_second":
+        items = [{"label": "语音/视频生成", "unit": "元/每秒", "price": str(output_price.normalize())}]
+    elif billing_mode == "per_10k_chars":
+        items = [{"label": "文本处理", "unit": "元/每万字符", "price": str(output_price.normalize())}]
+    else:
+        items = [
+            {"label": "输入", "unit": "元/百万Token", "price": str(input_price.normalize())},
+            {"label": "输出", "unit": "元/百万Token", "price": str(output_price.normalize())},
+        ]
+    return json.dumps(items, ensure_ascii=False)
+
+
 def serialize_model(model: ModelCatalog):
     return {
         "id": model.id,
@@ -32,6 +80,8 @@ def serialize_model(model: ModelCatalog):
         "display_name": model.display_name,
         "vendor_display_name": model.vendor_display_name,
         "category": model.category,
+        "billing_mode": model.billing_mode,
+        "pricing_items": ensure_model_pricing_items(model),
         "input_price_per_million": model.input_price_per_million,
         "output_price_per_million": model.output_price_per_million,
         "price_source": model.price_source,
@@ -73,6 +123,8 @@ def serialize_bailian_cache_model(row: BailianModelCache, imported_codes: set[st
         "model_code": row.model_code,
         "category": row.category,
         "capability_type": row.capability_type,
+        "billing_mode": row.billing_mode,
+        "pricing_items": ensure_cache_pricing_items(row),
         "description": row.description,
         "support_features": [item.strip() for item in row.support_features.split(",") if item.strip()],
         "tags": [item.strip() for item in row.tags.split(",") if item.strip()],
@@ -735,6 +787,8 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
         display_name=payload.display_name,
         vendor_display_name=payload.vendor_display_name,
         category=payload.category,
+        billing_mode=payload.billing_mode,
+        pricing_items=json.dumps(payload.pricing_items, ensure_ascii=False) if payload.pricing_items else build_default_pricing_items(payload.input_price_per_million, payload.output_price_per_million, payload.billing_mode),
         input_price_per_million=payload.input_price_per_million,
         output_price_per_million=payload.output_price_per_million,
         price_source="manual",
@@ -786,8 +840,16 @@ def update_model(
     for key, value in update_data.items():
         if key in {"support_features", "tags"} and value is not None:
             setattr(model, key, ",".join(value))
+        elif key == "pricing_items" and value is not None:
+            setattr(model, key, json.dumps(value, ensure_ascii=False))
         else:
             setattr(model, key, value)
+    if not model.pricing_items:
+        model.pricing_items = build_default_pricing_items(
+            Decimal(model.input_price_per_million),
+            Decimal(model.output_price_per_million),
+            model.billing_mode,
+        )
     if model.is_active:
         sync_and_probe_model(model)
     else:
