@@ -8,11 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_admin_user
 from app.db.session import get_db
-from app.models import ApiKey, ModelCatalog, ModelPriceSnapshot, PaymentOrder, RefundItem, RefundRequest, UsageLog, User, WalletAccount, WalletLedger
+from app.models import ApiKey, ModelCatalog, PaymentOrder, RefundItem, RefundRequest, UsageLog, User, WalletAccount, WalletLedger
 from app.schemas.admin import AdjustBalanceRequest, AdminResetPasswordRequest, CreateModelRequest, UpdateModelRequest
 from app.services.api_keys import delete_api_key as delete_api_key_service
 from app.services.auth import admin_reset_password
-from app.services.model_price_history import create_price_snapshot, create_price_snapshot_if_changed
 from app.services.official_model_catalog import get_official_model_examples
 from app.services.payments import create_payment_provider
 from app.services.wallet import apply_balance_change, mark_order_paid
@@ -86,17 +85,6 @@ def serialize_model(model: ModelCatalog):
         "example_curl": model.example_curl or examples.get("example_curl", ""),
         "is_active": model.is_active,
         "created_at": model.created_at,
-    }
-
-
-def serialize_price_snapshot(row: ModelPriceSnapshot):
-    return {
-        "id": row.id,
-        "model_catalog_id": row.model_catalog_id,
-        "input_price_per_million": row.input_price_per_million,
-        "output_price_per_million": row.output_price_per_million,
-        "note": row.note,
-        "created_at": row.created_at,
     }
 
 @router.get("/overview")
@@ -659,7 +647,6 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
     )
     db.add(model)
     db.flush()
-    create_price_snapshot(model=model, note="手动新增模型时创建价格快照", db=db)
     db.commit()
     db.refresh(model)
     return serialize_model(model)
@@ -675,8 +662,6 @@ def update_model(
     model = db.query(ModelCatalog).filter(ModelCatalog.id == model_id).first()
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
-    old_input_price = Decimal(model.input_price_per_million)
-    old_output_price = Decimal(model.output_price_per_million)
     update_data = payload.model_dump(exclude_unset=True)
     if "model_code" in update_data:
         duplicate = (
@@ -701,13 +686,6 @@ def update_model(
             Decimal(model.output_price_per_million),
             model.billing_mode,
         )
-    create_price_snapshot_if_changed(
-        model=model,
-        old_input_price=old_input_price,
-        old_output_price=old_output_price,
-        note="后台手动编辑模型价格",
-        db=db,
-    )
     db.commit()
     db.refresh(model)
     return serialize_model(model)
@@ -741,24 +719,3 @@ def delete_model(model_id: int, _: User = Depends(get_admin_user), db: Session =
     db.delete(model)
     db.commit()
     return {"success": True}
-
-
-@router.get("/models/{model_id}/price-history")
-def list_model_price_history(
-    model_id: int,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=50),
-    _: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    model = db.query(ModelCatalog).filter(ModelCatalog.id == model_id).first()
-    if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
-    query = (
-        db.query(ModelPriceSnapshot)
-        .filter(ModelPriceSnapshot.model_catalog_id == model_id)
-        .order_by(ModelPriceSnapshot.created_at.desc(), ModelPriceSnapshot.id.desc())
-    )
-    total = query.count()
-    rows = query.offset((page - 1) * page_size).limit(page_size).all()
-    return {"items": [serialize_price_snapshot(row) for row in rows], "total": total, "page": page, "page_size": page_size}

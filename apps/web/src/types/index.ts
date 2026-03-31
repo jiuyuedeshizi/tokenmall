@@ -220,15 +220,6 @@ export type AdminModel = ModelInfo & {
   created_at: string;
 };
 
-export type ModelPriceSnapshot = {
-  id: number;
-  model_catalog_id: number;
-  input_price_per_million: string;
-  output_price_per_million: string;
-  note: string;
-  created_at: string;
-};
-
 export type AdminRefund = RefundRequest & {
   user_id: number;
   user_email: string;

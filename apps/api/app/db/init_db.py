@@ -6,27 +6,15 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import Base, SessionLocal, engine
-from app.models import ApiKey, ModelCatalog, ModelPriceSnapshot, RefundRequest, User, WalletAccount
+from app.models import ApiKey, ModelCatalog, RefundRequest, User, WalletAccount
 from app.services.official_model_catalog import OFFICIAL_MODEL_CATALOG
 
-def sync_official_model_catalog(db: Session):
-    existing_models = {row.model_code: row for row in db.query(ModelCatalog).all()}
+def seed_official_model_catalog(db: Session):
+    if db.query(ModelCatalog.id).first():
+        return
+
     for model_code, item in OFFICIAL_MODEL_CATALOG.items():
         upstream_model_id = item.get("upstream_model_id", model_code)
-        existing = existing_models.get(model_code)
-        if existing:
-            existing.provider = item["provider"]
-            existing.model_id = upstream_model_id
-            existing.capability_type = item["capability_type"]
-            existing.display_name = item["display_name"]
-            existing.vendor_display_name = item["vendor_display_name"]
-            existing.category = item["category"]
-            existing.description = item["description"]
-            existing.hero_description = item["hero_description"]
-            existing.support_features = item["support_features"]
-            existing.tags = item["tags"]
-            continue
-
         db.add(
             ModelCatalog(
                 provider=item["provider"],
@@ -51,15 +39,6 @@ def sync_official_model_catalog(db: Session):
                 is_active=True,
             )
         )
-
-def prune_to_official_models(db: Session):
-    official_codes = set(OFFICIAL_MODEL_CATALOG.keys())
-    (
-        db.query(ModelCatalog)
-        .filter(~ModelCatalog.model_code.in_(official_codes))
-        .delete(synchronize_session=False)
-    )
-    db.query(ModelPriceSnapshot).delete(synchronize_session=False)
 
 
 def seed_admin(db: Session):
@@ -160,13 +139,12 @@ def initialize_database():
         if "sync_error" in model_columns:
             db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_error"))
             db.commit()
-        snapshot_columns = {column["name"] for column in inspector.get_columns("model_price_snapshots")}
-        if "price_source" in snapshot_columns:
-            db.execute(text("ALTER TABLE model_price_snapshots DROP COLUMN price_source"))
-            db.commit()
         existing_tables = set(inspector.get_table_names())
         if "bailian_model_cache" in existing_tables:
             db.execute(text("DROP TABLE bailian_model_cache"))
+            db.commit()
+        if "model_price_snapshots" in existing_tables:
+            db.execute(text("DROP TABLE model_price_snapshots"))
             db.commit()
         usage_log_columns = {column["name"] for column in inspector.get_columns("usage_logs")}
         if "response_time_ms" not in usage_log_columns:
@@ -192,8 +170,7 @@ def initialize_database():
         if "qr_code_image" not in payment_order_columns:
             db.execute(text("ALTER TABLE payment_orders ADD COLUMN qr_code_image VARCHAR(5000)"))
             db.commit()
-        sync_official_model_catalog(db)
-        prune_to_official_models(db)
+        seed_official_model_catalog(db)
         seed_admin(db)
         db.commit()
     finally:
