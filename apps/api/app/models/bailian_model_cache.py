@@ -25,7 +25,6 @@ class BailianModelCache(Base):
     tags: Mapped[str] = mapped_column(Text, default="", nullable=False)
     input_price_per_million: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     output_price_per_million: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
-    price_source: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
     owned_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     raw_payload: Mapped[str] = mapped_column(Text, default="", nullable=False)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

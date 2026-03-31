@@ -73,6 +73,10 @@ function isBailianNativeTtsModel(item: ModelInfo) {
   return item.provider === "alibaba-bailian" && item.model_id === "qwen3-tts-vd-2026-01-26";
 }
 
+function isBailianVideoModel(item: ModelInfo) {
+  return item.provider === "alibaba-bailian" && item.model_id === "wan2.6-i2v-flash";
+}
+
 function buildDefaultPythonSnippet(item: ModelInfo, baseUrl: string) {
   if (isBailianNativeImageModel(item)) {
     return [
@@ -171,6 +175,43 @@ function buildDefaultPythonSnippet(item: ModelInfo, baseUrl: string) {
       "    for line in stream_resp.iter_lines(decode_unicode=True):",
       "        if line:",
       "            print(line)",
+    ].join("\n");
+  }
+
+  if (isBailianVideoModel(item)) {
+    return [
+      "import requests",
+      "",
+      `submit_url = "${baseUrl}/api/v1/services/aigc/video-generation/video-synthesis"`,
+      `task_url = "${baseUrl}/api/v1/tasks/{task_id}"`,
+      "headers = {",
+      '    "Authorization": "Bearer YOUR_API_KEY",',
+      '    "Content-Type": "application/json",',
+      '    "X-DashScope-Async": "enable"',
+      "}",
+      "payload = {",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '        "prompt": "一只猫在草地上奔跑，镜头跟随，光线明亮自然。",',
+      '        "img_url": "https://cdn.translate.alibaba.com/r/wanx-demo-1.png"',
+      "    },",
+      '    "parameters": {',
+      '        "audio": false,',
+      '        "resolution": "720P",',
+      '        "prompt_extend": True,',
+      '        "watermark": True,',
+      '        "duration": 5',
+      "    }",
+      "}",
+      "submit_resp = requests.post(submit_url, headers=headers, json=payload, timeout=120)",
+      "submit_data = submit_resp.json()",
+      "task_id = submit_data['output']['task_id']",
+      "print(task_id)",
+      "",
+      "# 轮询任务结果",
+      "status_headers = {k: v for k, v in headers.items() if k != 'X-DashScope-Async'}",
+      "result_resp = requests.get(task_url.format(task_id=task_id), headers=status_headers, timeout=120)",
+      "print(result_resp.json())",
     ].join("\n");
   }
 
@@ -302,6 +343,46 @@ function buildDefaultTypescriptSnippet(item: ModelInfo, baseUrl: string) {
     ].join("\n");
   }
 
+  if (isBailianVideoModel(item)) {
+    return [
+      `const submitUrl = '${baseUrl}/api/v1/services/aigc/video-generation/video-synthesis';`,
+      "const payload = {",
+      `  model: '${item.model_id}',`,
+      "  input: {",
+      "    prompt: '一只猫在草地上奔跑，镜头跟随，光线明亮自然。',",
+      "    img_url: 'https://cdn.translate.alibaba.com/r/wanx-demo-1.png'",
+      "  },",
+      "  parameters: {",
+      "    audio: false,",
+      "    resolution: '720P',",
+      "    prompt_extend: true,",
+      "    watermark: true,",
+      "    duration: 5",
+      "  }",
+      "};",
+      "",
+      "const submitResponse = await fetch(submitUrl, {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY',",
+      "    'Content-Type': 'application/json',",
+      "    'X-DashScope-Async': 'enable'",
+      "  },",
+      "  body: JSON.stringify(payload)",
+      "});",
+      "const submitData = await submitResponse.json();",
+      "const taskId = submitData.output.task_id;",
+      "",
+      "const resultResponse = await fetch(`${submitUrl.replace('/services/aigc/video-generation/video-synthesis', '')}/tasks/${taskId}`, {",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY'",
+      "  }",
+      "});",
+      "const resultData = await resultResponse.json();",
+      "console.log(resultData);",
+    ].join("\n");
+  }
+
   return [
     `const response = await fetch('${baseUrl}/v1/chat/completions', {`,
     "  method: 'POST',",
@@ -406,6 +487,32 @@ function buildDefaultCurlSnippet(item: ModelInfo, baseUrl: string) {
     ].join("\n");
   }
 
+  if (isBailianVideoModel(item)) {
+    return [
+      `curl -X POST ${baseUrl}/api/v1/services/aigc/video-generation/video-synthesis \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      '  -H "X-DashScope-Async: enable" \\',
+      "  -d '{",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '      "prompt": "一只猫在草地上奔跑，镜头跟随，光线明亮自然。",',
+      '      "img_url": "https://cdn.translate.alibaba.com/r/wanx-demo-1.png"',
+      "    },",
+      '    "parameters": {',
+      '      "audio": false,',
+      '      "resolution": "720P",',
+      '      "prompt_extend": true,',
+      '      "watermark": true,',
+      '      "duration": 5',
+      "    }",
+      "  }'",
+      "",
+      `curl -X GET ${baseUrl}/api/v1/tasks/{task_id} \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY"',
+    ].join("\n");
+  }
+
   return [
     `curl -X POST ${baseUrl}/v1/chat/completions \\`,
     '  -H "Authorization: Bearer YOUR_API_KEY" \\',
@@ -440,40 +547,209 @@ function SideCard({
   );
 }
 
-function CodeBlock({
-  language,
-  code,
+const CODE_THEMES = {
+  ocean: {
+    label: "海蓝",
+    frame: "border-[#d8e7ff] bg-[linear-gradient(180deg,#f8fbff_0%,#eef5ff_100%)]",
+    toolbar: "border-[#dbe8ff] bg-white/78",
+    code: "bg-[#0f172a] text-[#e6eefc]",
+    gutter: "text-[#6b7ea8]",
+    plain: "text-[#dbe7ff]",
+    keyword: "text-[#7dd3fc]",
+    string: "text-[#f9c97e]",
+    comment: "text-[#7c8da8]",
+    number: "text-[#86efac]",
+    accent: "bg-[#315efb] text-white",
+    pill: "bg-[#e8f0ff] text-[#315efb]",
+    idle: "bg-white text-[#5f6f8d]",
+  },
+  sand: {
+    label: "暖砂",
+    frame: "border-[#eadcc5] bg-[linear-gradient(180deg,#fffdf8_0%,#f9f2e6_100%)]",
+    toolbar: "border-[#ebdfcc] bg-white/76",
+    code: "bg-[#2a2119] text-[#f8efe1]",
+    gutter: "text-[#a78a6e]",
+    plain: "text-[#f3eadc]",
+    keyword: "text-[#fcae6b]",
+    string: "text-[#f8d66d]",
+    comment: "text-[#9f8d78]",
+    number: "text-[#9ae6b4]",
+    accent: "bg-[#a65a2e] text-white",
+    pill: "bg-[#f8ead6] text-[#a65a2e]",
+    idle: "bg-white text-[#7f6a57]",
+  },
+  slate: {
+    label: "石墨",
+    frame: "border-[#d9dee7] bg-[linear-gradient(180deg,#fbfcfe_0%,#f2f5fa_100%)]",
+    toolbar: "border-[#e1e6ef] bg-white/80",
+    code: "bg-[#111827] text-[#e5e7eb]",
+    gutter: "text-[#76839b]",
+    plain: "text-[#dde3ee]",
+    keyword: "text-[#93c5fd]",
+    string: "text-[#fcd34d]",
+    comment: "text-[#7b8798]",
+    number: "text-[#c4f1be]",
+    accent: "bg-[#172033] text-white",
+    pill: "bg-[#ecf0f6] text-[#172033]",
+    idle: "bg-white text-[#667085]",
+  },
+} as const;
+
+type CodeTheme = keyof typeof CODE_THEMES;
+
+function tokenizeCodeLine(line: string) {
+  const tokens: Array<{ value: string; type: "plain" | "keyword" | "string" | "comment" | "number" }> = [];
+  const pattern =
+    /(#[^\n]*$|\/\/.*$|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\b(?:const|let|var|await|async|return|import|from|with|for|while|break|continue|if|else|elif|def|class|try|except|finally|raise|print|true|false|null|None|True|False)\b|\b\d+(?:\.\d+)?\b)/g;
+  let lastIndex = 0;
+
+  for (const match of line.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      tokens.push({ value: line.slice(lastIndex, index), type: "plain" });
+    }
+    const value = match[0];
+    let type: "plain" | "keyword" | "string" | "comment" | "number" = "plain";
+    if (value.startsWith("#") || value.startsWith("//")) {
+      type = "comment";
+    } else if (value.startsWith('"') || value.startsWith("'")) {
+      type = "string";
+    } else if (/^\d/.test(value)) {
+      type = "number";
+    } else {
+      type = "keyword";
+    }
+    tokens.push({ value, type });
+    lastIndex = index + value.length;
+  }
+
+  if (lastIndex < line.length) {
+    tokens.push({ value: line.slice(lastIndex), type: "plain" });
+  }
+
+  return tokens.length ? tokens : [{ value: line, type: "plain" as const }];
+}
+
+function CodeExampleViewer({
+  modelId,
+  snippets,
   onCopy,
 }: {
-  language: string;
-  code: string;
-  onCopy: () => void;
+  modelId: string;
+  snippets: Array<{ language: string; code: string }>;
+  onCopy: (value: string) => void;
 }) {
+  const [activeLanguage, setActiveLanguage] = useState(snippets[0]?.language ?? "Python");
+  const [theme, setTheme] = useState<CodeTheme>("ocean");
+
+  useEffect(() => {
+    if (!snippets.some((snippet) => snippet.language === activeLanguage)) {
+      setActiveLanguage(snippets[0]?.language ?? "Python");
+    }
+  }, [activeLanguage, snippets]);
+
+  const activeSnippet = snippets.find((snippet) => snippet.language === activeLanguage) ?? snippets[0];
+  const themeConfig = CODE_THEMES[theme];
+  const highlightedLines = useMemo(
+    () => (activeSnippet?.code ?? "").split("\n").map((line) => tokenizeCodeLine(line)),
+    [activeSnippet],
+  );
+
+  if (!activeSnippet) {
+    return null;
+  }
+
   return (
-    <div className="mt-8 first:mt-0">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="text-[18px] font-semibold text-[#172033]">{language}</div>
-        <button
-          className="flex items-center gap-2 text-[14px] font-semibold text-[#315efb]"
-          onClick={onCopy}
-          type="button"
-        >
-          <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24">
-            <rect height="14" rx="2" stroke="currentColor" strokeWidth="2" width="14" x="8" y="6" />
-            <path
-              d="M16 4H6a2 2 0 0 0-2 2v10"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-            />
-          </svg>
-          复制
-        </button>
+    <div className={`mt-6 rounded-[24px] border p-4 ${themeConfig.frame}`}>
+      <div className={`rounded-[18px] border px-4 py-3 ${themeConfig.toolbar}`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`rounded-full px-3 py-1 text-[12px] font-semibold ${themeConfig.pill}`}>
+              API 示例
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {snippets.map((snippet) => (
+                <button
+                  key={snippet.language}
+                  className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${
+                    snippet.language === activeLanguage ? themeConfig.accent : themeConfig.idle
+                  }`}
+                  onClick={() => setActiveLanguage(snippet.language)}
+                  type="button"
+                >
+                  {snippet.language}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {Object.entries(CODE_THEMES).map(([themeKey, value]) => (
+              <button
+                key={themeKey}
+                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                  theme === themeKey ? themeConfig.accent : themeConfig.idle
+                }`}
+                onClick={() => setTheme(themeKey as CodeTheme)}
+                type="button"
+              >
+                {value.label}
+              </button>
+            ))}
+            <button
+              className="ml-2 flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-[#315efb] shadow-sm"
+              onClick={() => onCopy(activeSnippet.code)}
+              type="button"
+            >
+              <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <rect height="14" rx="2" stroke="currentColor" strokeWidth="2" width="14" x="8" y="6" />
+                <path
+                  d="M16 4H6a2 2 0 0 0-2 2v10"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                />
+              </svg>
+              复制代码
+            </button>
+          </div>
+        </div>
       </div>
-      <pre className="overflow-x-auto rounded-[18px] bg-[#f4f6fb] p-8 text-[14px] leading-8 text-[#172033]">
-        <code>{code}</code>
-      </pre>
+      <div className={`mt-4 overflow-hidden rounded-[20px] ${themeConfig.code}`}>
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-[12px] uppercase tracking-[0.24em] text-white/70">
+          <span>{activeSnippet.language}</span>
+          <span>{modelId}</span>
+        </div>
+        <div className="overflow-x-auto px-0 py-4">
+          <code className="block min-w-full font-mono text-[13px] leading-7">
+            {highlightedLines.map((line, index) => (
+              <div key={index} className="grid grid-cols-[56px_minmax(0,1fr)] px-5">
+                <span className={`select-none pr-4 text-right ${themeConfig.gutter}`}>{index + 1}</span>
+                <span className="whitespace-pre">
+                  {line.map((token, tokenIndex) => (
+                    <span
+                      key={`${index}-${tokenIndex}`}
+                      className={
+                        token.type === "keyword"
+                          ? themeConfig.keyword
+                          : token.type === "string"
+                            ? themeConfig.string
+                            : token.type === "comment"
+                              ? themeConfig.comment
+                              : token.type === "number"
+                                ? themeConfig.number
+                                : themeConfig.plain
+                      }
+                    >
+                      {token.value || " "}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </code>
+        </div>
+      </div>
     </div>
   );
 }
@@ -593,16 +869,14 @@ export default function ModelDetailPage() {
             id="api-examples"
           >
             <h2 className="text-[22px] font-semibold text-[#172033]">API 使用示例</h2>
-            <div className="mt-6">
-              {snippets.map((snippet) => (
-                <CodeBlock
-                  key={snippet.language}
-                  code={snippet.code}
-                  language={snippet.language}
-                  onCopy={() => void copyText(snippet.code)}
-                />
-              ))}
-            </div>
+            <p className="mt-3 text-[15px] leading-7 text-[#667085]">
+              示例内容优先读取后台配置；如果后台没有单独设置，页面会自动回退到系统默认示例。
+            </p>
+            <CodeExampleViewer
+              modelId={item.model_id}
+              snippets={snippets}
+              onCopy={(value) => void copyText(value)}
+            />
           </section>
         </div>
 
@@ -656,6 +930,8 @@ export default function ModelDetailPage() {
             <p className="text-[16px] leading-8 text-[#4d596a]">
               {isBailianNativeImageModel(item)
                 ? "该模型使用阿里百炼原生图像生成接口，不走 /v1/chat/completions。请按下方原生接口示例接入。"
+                : isBailianVideoModel(item)
+                  ? "该模型使用阿里百炼异步视频生成接口。先提交 video-synthesis 任务拿 task_id，再轮询 /api/v1/tasks/{task_id} 获取视频地址。"
                 : isBailianNativeTtsModel(item)
                   ? "该模型使用阿里百炼原生多模态生成接口，支持普通 JSON 返回与 X-DashScope-SSE 流式返回；voice 请替换为声音设计生成的专属音色。"
                 : isChatCompatibleAsrModel(item)

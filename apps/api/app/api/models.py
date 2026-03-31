@@ -4,6 +4,7 @@ import json
 
 from app.db.session import get_db
 from app.models import ModelCatalog
+from app.services.official_model_catalog import get_official_model_examples
 
 router = APIRouter()
 MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5", "qwen3-asr-flash"}
@@ -34,6 +35,7 @@ def ensure_pricing_items(row: ModelCatalog) -> list[dict]:
 
 
 def serialize_model(row: ModelCatalog):
+    examples = get_official_model_examples(row.model_code)
     supports_multimodal_chat = (
         row.capability_type == "chat"
         and (row.model_code or "").strip().lower() in MULTIMODAL_CHAT_MODELS
@@ -41,9 +43,6 @@ def serialize_model(row: ModelCatalog):
     return {
         "id": row.id,
         "provider": row.provider,
-        "litellm_model_name": row.model_id or row.model_code,
-        "provider_model_name": row.model_id or row.model_code,
-        "upstream_model_id": row.model_id or row.model_code,
         "supports_multimodal_chat": supports_multimodal_chat,
         "vendor_display_name": row.vendor_display_name or row.provider,
         "model_code": row.model_code,
@@ -55,18 +54,14 @@ def serialize_model(row: ModelCatalog):
         "pricing_items": ensure_pricing_items(row),
         "input_price_per_million": row.input_price_per_million,
         "output_price_per_million": row.output_price_per_million,
-        "price_source": row.price_source,
-        "last_price_synced_at": row.last_price_synced_at,
         "description": row.description,
         "hero_description": row.hero_description or row.description,
         "rating": row.rating,
         "support_features": split_csv(row.support_features) or ["多轮对话"],
         "tags": split_csv(row.tags) or [row.category],
-        "example_python": row.example_python,
-        "example_typescript": row.example_typescript,
-        "example_curl": row.example_curl,
-        "sync_status": row.sync_status,
-        "sync_error": row.sync_error,
+        "example_python": row.example_python or examples.get("example_python", ""),
+        "example_typescript": row.example_typescript or examples.get("example_typescript", ""),
+        "example_curl": row.example_curl or examples.get("example_curl", ""),
     }
 
 

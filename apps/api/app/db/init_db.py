@@ -1,5 +1,4 @@
 from decimal import Decimal
-from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -13,20 +12,15 @@ from app.services.official_model_catalog import OFFICIAL_MODEL_CATALOG
 def sync_official_model_catalog(db: Session):
     existing_models = {row.model_code: row for row in db.query(ModelCatalog).all()}
     for model_code, item in OFFICIAL_MODEL_CATALOG.items():
+        upstream_model_id = item.get("upstream_model_id", model_code)
         existing = existing_models.get(model_code)
         if existing:
             existing.provider = item["provider"]
-            existing.model_id = model_code
+            existing.model_id = upstream_model_id
             existing.capability_type = item["capability_type"]
             existing.display_name = item["display_name"]
             existing.vendor_display_name = item["vendor_display_name"]
             existing.category = item["category"]
-            existing.billing_mode = item["billing_mode"]
-            existing.pricing_items = item["pricing_items"]
-            existing.input_price_per_million = item["input_price_per_million"]
-            existing.output_price_per_million = item["output_price_per_million"]
-            existing.price_source = item["price_source"]
-            existing.last_price_synced_at = datetime.now(timezone.utc)
             existing.description = item["description"]
             existing.hero_description = item["hero_description"]
             existing.support_features = item["support_features"]
@@ -37,7 +31,7 @@ def sync_official_model_catalog(db: Session):
             ModelCatalog(
                 provider=item["provider"],
                 model_code=model_code,
-                model_id=model_code,
+                model_id=upstream_model_id,
                 capability_type=item["capability_type"],
                 display_name=item["display_name"],
                 vendor_display_name=item["vendor_display_name"],
@@ -46,8 +40,6 @@ def sync_official_model_catalog(db: Session):
                 pricing_items=item["pricing_items"],
                 input_price_per_million=item["input_price_per_million"],
                 output_price_per_million=item["output_price_per_million"],
-                price_source=item["price_source"],
-                last_price_synced_at=datetime.now(timezone.utc),
                 description=item["description"],
                 hero_description=item["hero_description"],
                 rating=Decimal("4.80"),
@@ -57,8 +49,6 @@ def sync_official_model_catalog(db: Session):
                 example_typescript="",
                 example_curl="",
                 is_active=True,
-                sync_status="ready",
-                sync_error="",
             )
         )
 
@@ -82,7 +72,6 @@ def sync_official_model_catalog(db: Session):
         cache_item.pricing_items = item["pricing_items"]
         cache_item.input_price_per_million = item["input_price_per_million"]
         cache_item.output_price_per_million = item["output_price_per_million"]
-        cache_item.price_source = item["price_source"]
 
 def prune_to_official_models(db: Session):
     official_codes = set(OFFICIAL_MODEL_CATALOG.keys())
@@ -154,8 +143,8 @@ def initialize_database():
         if "vendor_display_name" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN vendor_display_name VARCHAR(120) NOT NULL DEFAULT ''"))
             db.commit()
-        if "price_source" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN price_source VARCHAR(32) NOT NULL DEFAULT 'manual'"))
+        if "price_source" in model_columns:
+            db.execute(text("ALTER TABLE model_catalog DROP COLUMN price_source"))
             db.commit()
         if "billing_mode" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN billing_mode VARCHAR(32) NOT NULL DEFAULT 'token'"))
@@ -163,8 +152,8 @@ def initialize_database():
         if "pricing_items" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
             db.commit()
-        if "last_price_synced_at" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN last_price_synced_at TIMESTAMP WITH TIME ZONE"))
+        if "last_price_synced_at" in model_columns:
+            db.execute(text("ALTER TABLE model_catalog DROP COLUMN last_price_synced_at"))
             db.commit()
         if "rating" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN rating NUMERIC(4,2) NOT NULL DEFAULT 4.80"))
@@ -187,11 +176,11 @@ def initialize_database():
         if "example_curl" not in model_columns:
             db.execute(text("ALTER TABLE model_catalog ADD COLUMN example_curl TEXT NOT NULL DEFAULT ''"))
             db.commit()
-        if "sync_status" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN sync_status VARCHAR(32) NOT NULL DEFAULT 'pending'"))
+        if "sync_status" in model_columns:
+            db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_status"))
             db.commit()
-        if "sync_error" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN sync_error TEXT NOT NULL DEFAULT ''"))
+        if "sync_error" in model_columns:
+            db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_error"))
             db.commit()
         bailian_cache_columns = {column["name"] for column in inspector.get_columns("bailian_model_cache")}
         if "billing_mode" not in bailian_cache_columns:
@@ -199,6 +188,13 @@ def initialize_database():
             db.commit()
         if "pricing_items" not in bailian_cache_columns:
             db.execute(text("ALTER TABLE bailian_model_cache ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
+            db.commit()
+        if "price_source" in bailian_cache_columns:
+            db.execute(text("ALTER TABLE bailian_model_cache DROP COLUMN price_source"))
+            db.commit()
+        snapshot_columns = {column["name"] for column in inspector.get_columns("model_price_snapshots")}
+        if "price_source" in snapshot_columns:
+            db.execute(text("ALTER TABLE model_price_snapshots DROP COLUMN price_source"))
             db.commit()
         usage_log_columns = {column["name"] for column in inspector.get_columns("usage_logs")}
         if "response_time_ms" not in usage_log_columns:

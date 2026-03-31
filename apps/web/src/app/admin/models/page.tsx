@@ -39,15 +39,6 @@ const providerOptions = [
   { label: "月之暗面", value: "moonshot", vendor: "Moonshot" },
 ] as const;
 
-const providerPrefixMap: Record<string, string> = {
-  "alibaba-bailian": "dashscope",
-  openai: "openai",
-  anthropic: "anthropic",
-  deepseek: "deepseek",
-  minimax: "minimax",
-  moonshot: "moonshot",
-};
-
 const categoryOptions = [
   { label: "文本模型", value: "text" },
   { label: "图像模型", value: "image" },
@@ -115,50 +106,6 @@ function formatBillingMode(value: string) {
   return billingModeOptions.find((item) => item.value === value)?.label ?? value;
 }
 
-function formatSyncStatus(value?: string) {
-  switch (value) {
-    case "ready":
-      return "已联通";
-    case "synced":
-      return "已同步";
-    case "disabled":
-      return "已停用";
-    case "error":
-      return "同步异常";
-    default:
-      return "待同步";
-  }
-}
-
-function formatPriceSource(value?: string) {
-  switch (value) {
-    case "official_doc":
-      return "官方文档";
-    case "seed":
-      return "系统预置";
-    case "preset":
-      return "价格映射";
-    case "imported":
-      return "百炼导入";
-    case "manual":
-      return "人工维护";
-    default:
-      return "未标注";
-  }
-}
-
-function buildLitellmPreview(provider: string, modelId: string) {
-  const normalizedModelId = modelId.trim();
-  if (!normalizedModelId) {
-    return "";
-  }
-  if (normalizedModelId.includes("/")) {
-    return normalizedModelId;
-  }
-  const prefix = providerPrefixMap[provider] ?? provider;
-  return `${prefix}/${normalizedModelId}`;
-}
-
 function parsePricingItemsInput(value: string): PricingItem[] {
   const content = value.trim();
   if (!content) {
@@ -197,8 +144,6 @@ export default function AdminModelsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const litellmPreview = buildLitellmPreview(form.provider, form.model_id);
-
   async function load() {
     const result = await apiFetch<PaginatedResponse<AdminModel>>(`/admin/models?page=${page}&page_size=${pageSize}`);
     setItems(result.items);
@@ -363,28 +308,6 @@ export default function AdminModelsPage() {
                       <div className="mt-2 text-[14px] text-[#667085]">
                         {item.is_active ? "已启用" : "已停用"} · {formatCategory(item.category)} · {formatCapability(item.capability_type)} · {formatBillingMode(item.billing_mode)} · {formatProvider(item.provider)}
                       </div>
-                      <div className="mt-2 text-[13px] text-[#98a2b3]">
-                        LiteLLM：{item.litellm_model_name || buildLitellmPreview(item.provider, item.model_id)}
-                      </div>
-                      <div className="mt-2 text-[12px] text-[#98a2b3]">
-                        价格来源：{formatPriceSource(item.price_source)}
-                        {item.last_price_synced_at ? ` · 最近同步 ${new Date(item.last_price_synced_at).toLocaleString("zh-CN")}` : ""}
-                      </div>
-                      <div className="mt-2">
-                        <span
-                          className={`rounded-full px-3 py-1 text-[12px] font-medium ${
-                            item.sync_status === "ready"
-                              ? "bg-[#e8f7ee] text-[#0f9f57]"
-                              : item.sync_status === "error"
-                                ? "bg-[#fff1f2] text-[#e11d48]"
-                                : item.sync_status === "disabled"
-                                  ? "bg-[#f3f5f9] text-[#667085]"
-                                  : "bg-[#eef4ff] text-[#315efb]"
-                          }`}
-                        >
-                          {formatSyncStatus(item.sync_status)}
-                        </span>
-                      </div>
                     </div>
                   </div>
 
@@ -396,12 +319,6 @@ export default function AdminModelsPage() {
                       </div>
                     ))}
                   </div>
-                  {item.sync_error ? (
-                    <div className="mt-4 rounded-[16px] border border-[#ffd6d6] bg-[#fff8f8] px-4 py-3 text-[13px] leading-6 text-[#c2410c]">
-                      最近探活结果：{item.sync_error}
-                    </div>
-                  ) : null}
-
                   <div className="mt-5 flex flex-wrap gap-2">
                     <button
                       className="rounded-full border border-[#315efb] px-4 py-2 text-sm font-semibold text-[#315efb]"
@@ -503,7 +420,9 @@ export default function AdminModelsPage() {
                       <div className="mb-2 text-[14px] font-medium text-[#4d596a]">{field.label}</div>
                       {field.type === "textarea" ? (
                         <textarea
-                          className="min-h-[110px] w-full rounded-[18px] border border-[#dbe3ef] px-4 py-3 text-[15px] text-[#172033] outline-none"
+                          className={`min-h-[110px] w-full rounded-[18px] border border-[#dbe3ef] px-4 py-3 text-[15px] text-[#172033] outline-none ${
+                            field.key.startsWith("example_") ? "font-mono leading-7" : ""
+                          }`}
                           onChange={(event) =>
                             setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
                           }
@@ -554,13 +473,13 @@ export default function AdminModelsPage() {
                       )}
                       {field.key === "model_id" ? (
                         <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          这里只填厂商真实模型名，例如 <span className="font-semibold text-[#172033]">qwen-plus</span>。
-                          系统会自动同步成 <span className="font-semibold text-[#315efb]">{litellmPreview || "提供商/模型名"}</span>
+                          这里只填透明代理实际转发用的上游模型 ID，例如 <span className="font-semibold text-[#172033]">qwen-plus</span>。
+                          当前系统要求它与平台模型编码保持一致。
                         </div>
                       ) : null}
                       {field.key === "capability_type" ? (
                         <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          能力类型决定模型探活和调用入口。对话会走 <span className="font-semibold text-[#172033]">chat/completions</span>，图像会走 <span className="font-semibold text-[#172033]">images/generations</span>，向量会走 <span className="font-semibold text-[#172033]">embeddings</span>。
+                          能力类型决定模型探活和调用入口。对话会走 <span className="font-semibold text-[#172033]">chat/completions</span>，图像/音频会走 <span className="font-semibold text-[#172033]">multimodal-generation</span>，视频会走 <span className="font-semibold text-[#172033]">video-synthesis</span>，向量会走 <span className="font-semibold text-[#172033]">embeddings</span>。
                         </div>
                       ) : null}
                       {field.key === "billing_mode" ? (
@@ -571,6 +490,11 @@ export default function AdminModelsPage() {
                       {field.key === "pricing_items_json" ? (
                         <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
                           这里填写价格项数组 JSON，用于展示文档中的详细价格，例如输入/输出、按张或按秒等计费项。
+                        </div>
+                      ) : null}
+                      {field.key.startsWith("example_") ? (
+                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
+                          详情页会优先显示这里配置的示例；留空时，系统会自动回退到后台预置示例。建议在这里维护更贴近业务场景的调用代码。
                         </div>
                       ) : null}
                     </label>

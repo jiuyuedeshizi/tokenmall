@@ -14,6 +14,7 @@ from app.services.api_keys import delete_api_key as delete_api_key_service
 from app.services.auth import admin_reset_password
 from app.services.bailian_catalog import fetch_bailian_models, import_bailian_models, sync_prices_from_bailian_cache, upsert_bailian_cache
 from app.services.model_price_history import create_price_snapshot, create_price_snapshot_if_changed
+from app.services.official_model_catalog import get_official_model_examples
 from app.services.payments import create_payment_provider
 from app.services.wallet import apply_balance_change, mark_order_paid
 
@@ -69,6 +70,7 @@ def build_default_pricing_items(input_price: Decimal, output_price: Decimal, bil
 
 
 def serialize_model(model: ModelCatalog):
+    examples = get_official_model_examples(model.model_code)
     supports_multimodal_chat = (
         model.capability_type == "chat"
         and (model.model_code or "").strip().lower() in MULTIMODAL_CHAT_MODELS
@@ -76,9 +78,6 @@ def serialize_model(model: ModelCatalog):
     return {
         "id": model.id,
         "provider": model.provider,
-        "litellm_model_name": model.model_id,
-        "provider_model_name": model.model_id,
-        "upstream_model_id": model.model_id,
         "supports_multimodal_chat": supports_multimodal_chat,
         "model_code": model.model_code,
         "model_id": model.model_id,
@@ -90,18 +89,14 @@ def serialize_model(model: ModelCatalog):
         "pricing_items": ensure_model_pricing_items(model),
         "input_price_per_million": model.input_price_per_million,
         "output_price_per_million": model.output_price_per_million,
-        "price_source": model.price_source,
-        "last_price_synced_at": model.last_price_synced_at,
         "rating": model.rating,
         "description": model.description,
         "hero_description": model.hero_description,
         "support_features": [item.strip() for item in model.support_features.split(",") if item.strip()],
         "tags": [item.strip() for item in model.tags.split(",") if item.strip()],
-        "example_python": model.example_python,
-        "example_typescript": model.example_typescript,
-        "example_curl": model.example_curl,
-        "sync_status": model.sync_status,
-        "sync_error": model.sync_error,
+        "example_python": model.example_python or examples.get("example_python", ""),
+        "example_typescript": model.example_typescript or examples.get("example_typescript", ""),
+        "example_curl": model.example_curl or examples.get("example_curl", ""),
         "is_active": model.is_active,
         "created_at": model.created_at,
     }
@@ -113,7 +108,6 @@ def serialize_price_snapshot(row: ModelPriceSnapshot):
         "model_catalog_id": row.model_catalog_id,
         "input_price_per_million": row.input_price_per_million,
         "output_price_per_million": row.output_price_per_million,
-        "price_source": row.price_source,
         "note": row.note,
         "created_at": row.created_at,
     }
@@ -136,7 +130,6 @@ def serialize_bailian_cache_model(row: BailianModelCache, imported_codes: set[st
         "tags": [item.strip() for item in row.tags.split(",") if item.strip()],
         "input_price_per_million": row.input_price_per_million,
         "output_price_per_million": row.output_price_per_million,
-        "price_source": row.price_source,
         "owned_by": row.owned_by,
         "is_available": row.is_available,
         "last_synced_at": row.last_synced_at,
@@ -728,23 +721,12 @@ async def import_selected_bailian_models(
     }
     models = import_bailian_models(db, upstream_ids)
     for model in models:
-        if existing_ids.get(model.model_code):
+        if not existing_ids.get(model.model_code):
             create_price_snapshot(
                 model=model,
-                price_source=model.price_source or "imported",
-                note="从百炼导入模型时更新价格",
-                db=db,
-            )
-        else:
-            create_price_snapshot(
-                model=model,
-                price_source=model.price_source or "imported",
                 note="从百炼导入模型时创建价格快照",
                 db=db,
             )
-        if model.is_active:
-            model.sync_status = "ready"
-            model.sync_error = ""
     db.commit()
     return {"success": True, "count": len(models)}
 
@@ -760,7 +742,6 @@ async def sync_bailian_model_prices(
         row.id: (
             Decimal(row.input_price_per_million),
             Decimal(row.output_price_per_million),
-            row.price_source or "manual",
         )
         for row in db.query(ModelCatalog).all()
     }
@@ -773,13 +754,9 @@ async def sync_bailian_model_prices(
             model=model,
             old_input_price=old[0],
             old_output_price=old[1],
-            old_source=old[2],
             note="同步百炼价格后记录快照",
             db=db,
         )
-        if model.is_active:
-            model.sync_status = "ready"
-            model.sync_error = ""
     db.commit()
     return {"success": True, "updated": updated}
 
@@ -803,7 +780,6 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
         pricing_items=json.dumps(payload.pricing_items, ensure_ascii=False) if payload.pricing_items else build_default_pricing_items(payload.input_price_per_million, payload.output_price_per_million, payload.billing_mode),
         input_price_per_million=payload.input_price_per_million,
         output_price_per_million=payload.output_price_per_million,
-        price_source="manual",
         rating=payload.rating,
         description=payload.description,
         hero_description=payload.hero_description,
@@ -816,13 +792,7 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
     )
     db.add(model)
     db.flush()
-    create_price_snapshot(model=model, price_source="manual", note="手动新增模型时创建价格快照", db=db)
-    if model.is_active:
-        model.sync_status = "ready"
-        model.sync_error = ""
-    else:
-        model.sync_status = "disabled"
-        model.sync_error = ""
+    create_price_snapshot(model=model, note="手动新增模型时创建价格快照", db=db)
     db.commit()
     db.refresh(model)
     return serialize_model(model)
@@ -840,7 +810,6 @@ def update_model(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     old_input_price = Decimal(model.input_price_per_million)
     old_output_price = Decimal(model.output_price_per_million)
-    old_source = model.price_source or "manual"
     update_data = payload.model_dump(exclude_unset=True)
     if "model_code" in update_data:
         duplicate = (
@@ -865,17 +834,10 @@ def update_model(
             Decimal(model.output_price_per_million),
             model.billing_mode,
         )
-    if model.is_active:
-        model.sync_status = "ready"
-        model.sync_error = ""
-    else:
-        model.sync_status = "disabled"
-        model.sync_error = ""
     create_price_snapshot_if_changed(
         model=model,
         old_input_price=old_input_price,
         old_output_price=old_output_price,
-        old_source=old_source,
         note="后台手动编辑模型价格",
         db=db,
     )
@@ -890,8 +852,6 @@ def enable_model(model_id: int, _: User = Depends(get_admin_user), db: Session =
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     model.is_active = True
-    model.sync_status = "ready"
-    model.sync_error = ""
     db.commit()
     return {"success": True}
 
@@ -902,8 +862,6 @@ def disable_model(model_id: int, _: User = Depends(get_admin_user), db: Session 
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     model.is_active = False
-    model.sync_status = "disabled"
-    model.sync_error = ""
     db.commit()
     return {"success": True}
 

@@ -88,11 +88,10 @@ class CreateModelRequest(BaseModel):
 
     @field_validator("model_id")
     @classmethod
-    def validate_model_id_matches_model_code(cls, value: str, info) -> str:
-        model_code = info.data.get("model_code")
-        normalized_model_id = (value or "").strip().lower()
-        if model_code and normalized_model_id != model_code:
-            raise ValueError("透明代理要求 model_id 与 model_code 完全一致")
+    def validate_model_id(cls, value: str) -> str:
+        normalized_model_id = (value or "").strip()
+        if not normalized_model_id:
+            raise ValueError("真实模型 ID 不能为空")
         return normalized_model_id
 
 

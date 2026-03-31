@@ -59,12 +59,6 @@ def resolve_chat_route(model_code: str, db: Session) -> RouteTarget:
     upstream_model_id = (model.model_id or "").strip()
     if not upstream_model_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模型未配置上游 model_id")
-    if normalized_code != upstream_model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前透明代理要求 model_code 与上游 model_id 完全一致",
-        )
-
     base_url, api_key, headers = _resolve_provider(model)
     if not base_url:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider base_url 未配置")
@@ -99,12 +93,6 @@ def resolve_bailian_multimodal_generation_route(model_code: str, db: Session) ->
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持百炼原生图像或语音模型")
 
     upstream_model_id = (model.model_id or "").strip()
-    if normalized_code != upstream_model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前透明代理要求 model_code 与上游 model_id 完全一致",
-        )
-
     config = get_bailian_provider_config()
     if not config.api_key:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider api_key 未配置")
@@ -137,12 +125,6 @@ def resolve_bailian_video_synthesis_route(model_code: str, db: Session) -> Route
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持视频生成模型")
 
     upstream_model_id = (model.model_id or "").strip()
-    if normalized_code != upstream_model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前透明代理要求 model_code 与上游 model_id 完全一致",
-        )
-
     config = get_bailian_provider_config()
     if not config.api_key:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider api_key 未配置")

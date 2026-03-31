@@ -92,7 +92,6 @@ def build_cache_payload(raw_item: dict) -> dict:
         "pricing_items": str(official_metadata.get("pricing_items") or "[]"),
         "input_price_per_million": official_metadata.get("input_price_per_million"),
         "output_price_per_million": official_metadata.get("output_price_per_million"),
-        "price_source": str(official_metadata.get("price_source") or "unknown"),
         "owned_by": str(raw_item.get("owned_by") or ""),
         "raw_payload": json.dumps(raw_item, ensure_ascii=False),
         "is_available": True,
@@ -153,14 +152,6 @@ def import_bailian_models(db, upstream_ids: list[str]) -> list[ModelCatalog]:
             existing.display_name = row.display_name
             existing.vendor_display_name = row.provider_display_name
             existing.category = row.category
-            existing.billing_mode = row.billing_mode or "token"
-            existing.pricing_items = row.pricing_items or "[]"
-            if row.input_price_per_million is not None:
-                existing.input_price_per_million = row.input_price_per_million
-            if row.output_price_per_million is not None:
-                existing.output_price_per_million = row.output_price_per_million
-            existing.price_source = row.price_source or "imported"
-            existing.last_price_synced_at = row.last_synced_at
             if row.description:
                 existing.description = row.description
                 existing.hero_description = row.description
@@ -182,8 +173,6 @@ def import_bailian_models(db, upstream_ids: list[str]) -> list[ModelCatalog]:
             pricing_items=row.pricing_items or "[]",
             input_price_per_million=row.input_price_per_million or Decimal("0.0000"),
             output_price_per_million=row.output_price_per_million or Decimal("0.0000"),
-            price_source=row.price_source or "imported",
-            last_price_synced_at=row.last_synced_at,
             description=row.description,
             hero_description=row.description,
             support_features=row.support_features,
@@ -197,36 +186,4 @@ def import_bailian_models(db, upstream_ids: list[str]) -> list[ModelCatalog]:
 
 
 def sync_prices_from_bailian_cache(db) -> int:
-    price_rows = (
-        db.query(BailianModelCache)
-        .filter(BailianModelCache.is_available.is_(True))
-        .filter(
-            (BailianModelCache.input_price_per_million.is_not(None))
-            | (BailianModelCache.output_price_per_million.is_not(None))
-        )
-        .all()
-    )
-    updated = 0
-    for cache_row in price_rows:
-        model = db.query(ModelCatalog).filter(ModelCatalog.model_id == cache_row.upstream_model_id).first()
-        if not model:
-            continue
-        changed = False
-        if model.billing_mode != (cache_row.billing_mode or "token"):
-            model.billing_mode = cache_row.billing_mode or "token"
-            changed = True
-        if (model.pricing_items or "[]") != (cache_row.pricing_items or "[]"):
-            model.pricing_items = cache_row.pricing_items or "[]"
-            changed = True
-        if cache_row.input_price_per_million is not None and model.input_price_per_million != cache_row.input_price_per_million:
-            model.input_price_per_million = cache_row.input_price_per_million
-            changed = True
-        if cache_row.output_price_per_million is not None and model.output_price_per_million != cache_row.output_price_per_million:
-            model.output_price_per_million = cache_row.output_price_per_million
-            changed = True
-        if changed:
-            model.price_source = cache_row.price_source or "imported"
-            model.last_price_synced_at = cache_row.last_synced_at
-            updated += 1
-    db.flush()
-    return updated
+    return 0

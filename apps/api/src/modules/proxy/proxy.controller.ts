@@ -20,7 +20,7 @@ export class ProxyController {
       throw new Error('余额不足')
     }
 
-    // 2️⃣ 调 LiteLLM
+    // 2️⃣ 调代理服务
     const res = await axios.post(
       'http://localhost:4000/v1/chat/completions',
       body,

@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import json
 import unittest
 from decimal import Decimal
@@ -76,6 +77,13 @@ class FakeAsyncClientNonStream:
         type(self).captured_headers = headers
         return type(self).response
 
+    async def request(self, method, url, content=None, headers=None):
+        type(self).captured_url = url
+        type(self).captured_content = content
+        type(self).captured_headers = headers
+        type(self).captured_method = method
+        return type(self).response
+
 
 class FakeStreamingResponse:
     def __init__(self, status_code=200, headers=None, chunks=None):
@@ -122,8 +130,8 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         request = build_request(body, headers={"content-type": "application/json", "authorization": "Bearer client-key"})
         FakeAsyncClientNonStream.response = httpx.Response(
             200,
-            headers={"content-type": "application/json", "x-upstream": "ok"},
-            content=b'{"id":"resp_1","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}',
+            headers={"content-type": "application/json", "x-upstream": "ok", "content-encoding": "gzip"},
+            content=gzip.compress(b'{"id":"resp_1","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}'),
             request=httpx.Request("POST", "https://unit.test/chat/completions"),
         )
 
@@ -141,6 +149,28 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(FakeAsyncClientNonStream.captured_headers["authorization"], "Bearer provider-secret")
         self.assertEqual(FakeAsyncClientNonStream.captured_headers["x-provider"], "bailian")
         self.assertNotIn("host", {key.lower() for key in FakeAsyncClientNonStream.captured_headers})
+        self.assertNotIn("content-encoding", {key.lower() for key in response.headers})
+
+    async def test_forward_request_supports_get_without_body(self):
+        request = build_request(b"", headers={"authorization": "Bearer client-key"})
+        FakeAsyncClientNonStream.response = httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=b'{"output":{"task_status":"SUCCEEDED"}}',
+            request=httpx.Request("GET", "https://unit.test/tasks/task_1"),
+        )
+
+        with patch("app.services.proxy.httpx.AsyncClient", FakeAsyncClientNonStream):
+            response = await forward_request(
+                request=request,
+                provider_url="https://unit.test/tasks/task_1",
+                api_key="provider-secret",
+                method="GET",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(FakeAsyncClientNonStream.captured_method, "GET")
+        self.assertIsNone(FakeAsyncClientNonStream.captured_content)
 
     async def test_forward_stream_yields_chunks_and_collects_usage(self):
         chunks = [
@@ -342,6 +372,44 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 0)
         self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.0015"))
 
+    async def test_before_request_estimates_per_second_reservation(self):
+        api_key = SimpleNamespace(
+            id=1,
+            status="active",
+            token_limit=None,
+            request_limit=None,
+            budget_limit=None,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.0000"),
+        )
+        user = SimpleNamespace(id=1, status="active")
+        model = SimpleNamespace(
+            model_code="wan2.6-i2v-flash",
+            billing_mode="per_second",
+            pricing_items='[{"label":"720P 无声","unit":"元/每秒","price":"0.15"},{"label":"1080P 无声","unit":"元/每秒","price":"0.25"},{"label":"720P 有声","unit":"元/每秒","price":"0.3"},{"label":"1080P 有声","unit":"元/每秒","price":"0.5"}]',
+            input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            display_name="Wan Video",
+        )
+
+        with (
+            patch("app.services.proxy.get_wallet_account", return_value=SimpleNamespace(balance=Decimal("10"), reserved_balance=Decimal("0"))),
+            patch("app.services.proxy.create_usage_reservation") as create_reservation,
+        ):
+            request_id = before_request(
+                api_key=api_key,
+                user=user,
+                payload={"parameters": {"audio": False, "resolution": "720P", "duration": 5}},
+                model=model,
+                db=object(),
+            )
+
+        self.assertTrue(request_id.startswith("req_"))
+        self.assertEqual(create_reservation.call_args.kwargs["estimated_input_tokens"], 5)
+        self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 0)
+        self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.8250"))
+
 
 class RoutingTests(unittest.TestCase):
     def test_resolve_chat_route_for_bailian(self):
@@ -371,6 +439,22 @@ class RoutingTests(unittest.TestCase):
             route = resolve_bailian_multimodal_generation_route("qwen3-tts-vd-2026-01-26", FakeDB(model))
 
         self.assertEqual(route.provider_url, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation")
+        self.assertEqual(route.provider_api_key, "bk")
+
+    def test_resolve_bailian_video_route_accepts_video(self):
+        model = SimpleNamespace(
+            provider="alibaba-bailian",
+            model_code="wan2.6-i2v-flash",
+            model_id="wan2.6-i2v-flash",
+            capability_type="video",
+            is_active=True,
+        )
+        with patch("app.services.routing.get_bailian_provider_config", return_value=SimpleNamespace(native_api_base="https://dashscope.aliyuncs.com/api/v1", api_key="bk", headers={})):
+            from app.services.routing import resolve_bailian_video_synthesis_route
+
+            route = resolve_bailian_video_synthesis_route("wan2.6-i2v-flash", FakeDB(model))
+
+        self.assertEqual(route.provider_url, "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis")
         self.assertEqual(route.provider_api_key, "bk")
 
     def test_resolve_chat_route_rejects_tencent_placeholder(self):

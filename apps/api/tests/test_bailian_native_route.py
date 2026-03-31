@@ -152,3 +152,64 @@ class BailianNativeRouteTests(unittest.TestCase):
         after_estimated_character_response.assert_called_once()
         after_response.assert_not_called()
         on_error.assert_not_called()
+
+    def test_video_synthesis_route_forwards_and_bills_by_duration(self):
+        raw_body = (
+            b'{"model":"wan2.6-i2v-flash","input":{"prompt":"run","img_url":"https://example.com/cat.png"},"parameters":{"audio":false,"resolution":"720P","duration":5}}'
+        )
+
+        async def fake_forward_request(request, provider_url, api_key, provider_headers=None, method="POST"):  # noqa: ARG001
+            self.assertEqual(method, "POST")
+            self.assertEqual(await request.body(), raw_body)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "request_id": "video_req_1",
+                    "output": {
+                        "task_id": "task_video_1",
+                        "task_status": "PENDING",
+                    },
+                },
+            )
+
+        with (
+            patch("app.api.bailian_native.resolve_bailian_video_synthesis_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="wan2.6-i2v-flash", billing_mode="per_second"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", provider_api_key="provider-secret", provider_headers={})),
+            patch("app.api.bailian_native.before_request", return_value="req_video"),
+            patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request),
+            patch("app.api.bailian_native.after_response") as after_response,
+            patch("app.api.bailian_native.on_error") as on_error,
+        ):
+            response = self.client.post(
+                "/api/v1/services/aigc/video-generation/video-synthesis",
+                content=raw_body,
+                headers={
+                    "Authorization": "Bearer tk_live_unit",
+                    "Content-Type": "application/json",
+                    "X-DashScope-Async": "enable",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        usage = after_response.call_args.kwargs["response_payload"]["usage"]
+        self.assertEqual(usage["second_count"], 5)
+        self.assertEqual(usage["resolution"], "720P")
+        self.assertEqual(usage["audio"], False)
+        on_error.assert_not_called()
+
+    def test_task_status_route_forwards_get(self):
+        async def fake_forward_request(request, provider_url, api_key, provider_headers=None, method="POST"):  # noqa: ARG001
+            self.assertEqual(method, "GET")
+            self.assertTrue(provider_url.endswith("/api/v1/tasks/task_123"))
+            return JSONResponse(
+                status_code=200,
+                content={"output": {"task_id": "task_123", "task_status": "SUCCEEDED"}},
+            )
+
+        with patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request):
+            response = self.client.get(
+                "/api/v1/tasks/task_123",
+                headers={"Authorization": "Bearer tk_live_unit"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["output"]["task_status"], "SUCCEEDED")

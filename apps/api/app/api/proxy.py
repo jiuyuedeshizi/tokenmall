@@ -22,6 +22,16 @@ from app.services.routing import resolve_chat_route
 router = APIRouter()
 
 
+def _build_upstream_payload_bytes(payload: dict, upstream_model_id: str) -> bytes | None:
+    if not upstream_model_id:
+        return None
+    if str(payload.get("model", "")) == upstream_model_id:
+        return None
+    upstream_payload = dict(payload)
+    upstream_payload["model"] = upstream_model_id
+    return json.dumps(upstream_payload, ensure_ascii=False).encode("utf-8")
+
+
 @router.post("/chat/completions")
 async def create_chat_completion(
     request: Request,
@@ -53,6 +63,10 @@ async def create_chat_completion(
     route_target = resolve_chat_route(str(payload.get("model", "")), db)
     request_id = before_request(api_key=api_key, user=user, payload=payload, model=route_target.model, db=db)
     stream_enabled = bool(payload.get("stream"))
+    body_override = _build_upstream_payload_bytes(
+        payload,
+        getattr(route_target, "upstream_model_id", str(payload.get("model", ""))),
+    )
     started_at = perf_counter()
 
     if not stream_enabled:
@@ -62,6 +76,7 @@ async def create_chat_completion(
                 provider_url=route_target.provider_url,
                 api_key=route_target.provider_api_key,
                 provider_headers=route_target.provider_headers,
+                body_override=body_override,
             )
         except Exception as exc:  # noqa: BLE001
             response_time_ms = int((perf_counter() - started_at) * 1000)
@@ -126,6 +141,7 @@ async def create_chat_completion(
             provider_url=route_target.provider_url,
             api_key=route_target.provider_api_key,
             provider_headers=route_target.provider_headers,
+            body_override=body_override,
         )
     except Exception as exc:  # noqa: BLE001
         response_time_ms = int((perf_counter() - started_at) * 1000)

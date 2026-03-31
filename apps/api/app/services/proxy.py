@@ -460,7 +460,7 @@ def _build_downstream_headers(headers: httpx.Headers) -> dict[str, str]:
     return {
         key: value
         for key, value in headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS
+        if key.lower() not in HOP_BY_HOP_HEADERS | {"content-encoding"}
     }
 
 
@@ -498,8 +498,9 @@ async def forward_request(
     api_key: str,
     provider_headers: dict[str, str] | None = None,
     method: str = "POST",
+    body_override: bytes | None = None,
 ) -> Response | JSONResponse:
-    body = await request.body() if method.upper() != "GET" else None
+    body = body_override if body_override is not None else (await request.body() if method.upper() != "GET" else None)
     headers = _build_upstream_headers(request, api_key, provider_headers)
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -532,8 +533,9 @@ async def forward_stream(
     provider_url: str,
     api_key: str,
     provider_headers: dict[str, str] | None = None,
+    body_override: bytes | None = None,
 ) -> tuple[Response | JSONResponse, dict[str, object]]:
-    body = await request.body()
+    body = body_override if body_override is not None else await request.body()
     headers = _build_upstream_headers(request, api_key, provider_headers)
     client = httpx.AsyncClient(timeout=None)
     try:

@@ -126,7 +126,6 @@ export type DashboardSummary = {
 export type ModelInfo = {
   id: number;
   provider: string;
-  litellm_model_name?: string;
   supports_multimodal_chat?: boolean;
   vendor_display_name: string;
   model_code: string;
@@ -138,8 +137,6 @@ export type ModelInfo = {
   pricing_items: PricingItem[];
   input_price_per_million: string;
   output_price_per_million: string;
-  price_source?: string;
-  last_price_synced_at?: string | null;
   description: string;
   hero_description: string;
   rating: number;
@@ -148,8 +145,6 @@ export type ModelInfo = {
   example_python: string;
   example_typescript: string;
   example_curl: string;
-  sync_status?: string;
-  sync_error?: string;
 };
 
 export type AdminOverview = {
@@ -241,7 +236,6 @@ export type BailianCatalogItem = {
   tags: string[];
   input_price_per_million: string | null;
   output_price_per_million: string | null;
-  price_source: string;
   owned_by: string;
   is_available: boolean;
   is_imported: boolean;
@@ -253,7 +247,6 @@ export type ModelPriceSnapshot = {
   model_catalog_id: number;
   input_price_per_million: string;
   output_price_per_million: string;
-  price_source: string;
   note: string;
   created_at: string;
 };

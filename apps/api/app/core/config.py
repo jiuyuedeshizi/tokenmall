@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     jwt_secret: str = Field(default="change-me-jwt-secret", alias="JWT_SECRET")
     jwt_expire_minutes: int = Field(default=60 * 24, alias="JWT_EXPIRE_MINUTES")
-    litellm_url: str = Field(default="", alias="LITELLM_URL")
-    litellm_master_key: str = Field(default="", alias="LITELLM_MASTER_KEY")
     bailian_api_key: str = Field(default="", alias="BAILIAN_API_KEY")
     bailian_api_base: str = Field(
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
