@@ -62,6 +62,15 @@ class Settings(BaseSettings):
         default="https://gateway.test.95516.com/gateway/api/queryTrans.do",
         alias="UNIONPAY_QUERY_URL",
     )
+    db_pool_size: int = Field(default=20, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=40, alias="DB_MAX_OVERFLOW")
+    db_pool_timeout_seconds: int = Field(default=30, alias="DB_POOL_TIMEOUT_SECONDS")
+    db_pool_recycle_seconds: int = Field(default=1800, alias="DB_POOL_RECYCLE_SECONDS")
+    proxy_http_connect_timeout_seconds: float = Field(default=5.0, alias="PROXY_HTTP_CONNECT_TIMEOUT_SECONDS")
+    proxy_http_read_timeout_seconds: float = Field(default=120.0, alias="PROXY_HTTP_READ_TIMEOUT_SECONDS")
+    proxy_http_write_timeout_seconds: float = Field(default=30.0, alias="PROXY_HTTP_WRITE_TIMEOUT_SECONDS")
+    proxy_http_pool_timeout_seconds: float = Field(default=5.0, alias="PROXY_HTTP_POOL_TIMEOUT_SECONDS")
+    proxy_stream_pending_limit_bytes: int = Field(default=262144, alias="PROXY_STREAM_PENDING_LIMIT_BYTES")
 
     @property
     def cors_origins(self) -> list[str]:

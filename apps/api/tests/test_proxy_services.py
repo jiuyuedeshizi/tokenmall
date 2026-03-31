@@ -191,6 +191,31 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(FakeAsyncClientStream.captured_request.headers["authorization"], "Bearer provider-secret")
         self.assertTrue(FakeAsyncClientStream.response.closed)
 
+    async def test_forward_stream_drops_oversized_pending_buffer_and_resyncs(self):
+        oversized_prefix = b"x" * 300000
+        chunks = [
+            oversized_prefix,
+            b'data: {"id":"chatcmpl-2","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        FakeAsyncClientStream.response = FakeStreamingResponse(chunks=chunks)
+        request = build_request(b'{"model":"qwen-plus","stream":true}', headers={"authorization": "Bearer client"})
+
+        with patch("app.services.proxy.get_proxy_http_client", return_value=FakeAsyncClientStream()):
+            response, state = await forward_stream(
+                request=request,
+                provider_url="https://unit.test/chat/completions",
+                api_key="provider-secret",
+                provider_headers=None,
+            )
+            streamed = []
+            async for chunk in response.body_iterator:
+                streamed.append(chunk)
+
+        self.assertEqual(streamed, chunks)
+        self.assertEqual(state["upstream_id"], "chatcmpl-2")
+        self.assertEqual(state["usage"]["total_tokens"], 3)
+
     async def test_forward_stream_surfaces_upstream_error_payload(self):
         FakeAsyncClientStream.response = FakeStreamingResponse(
             status_code=429,

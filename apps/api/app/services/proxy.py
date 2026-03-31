@@ -12,6 +12,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import ApiKey, UsageLog, UsageReservation, User
 from app.services.http_client import get_proxy_http_client
 from app.services.observability import increment_metric, log_event, metrics_timer
@@ -31,6 +32,7 @@ from app.services.wallet import (
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
 RESERVE_BUFFER_MULTIPLIER = Decimal("1.10")
+MAX_STREAM_PENDING_BYTES = settings.proxy_stream_pending_limit_bytes
 HOP_BY_HOP_HEADERS = {
     "authorization",
     "connection",
@@ -953,6 +955,14 @@ async def forward_stream(
                         pending += chunk.decode("utf-8")
                     except UnicodeDecodeError:
                         pending += chunk.decode("utf-8", errors="ignore")
+                    if len(pending.encode("utf-8")) > MAX_STREAM_PENDING_BYTES:
+                        increment_metric("proxy.stream_pending_trimmed_total")
+                        log_event(
+                            "proxy.stream_pending_trimmed",
+                            provider_url=provider_url,
+                            limit_bytes=MAX_STREAM_PENDING_BYTES,
+                        )
+                        pending = ""
                     while "\n" in pending:
                         line, pending = pending.split("\n", 1)
                         stripped = line.strip()
