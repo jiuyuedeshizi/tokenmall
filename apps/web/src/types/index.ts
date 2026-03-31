@@ -220,28 +220,6 @@ export type AdminModel = ModelInfo & {
   created_at: string;
 };
 
-export type BailianCatalogItem = {
-  id: number;
-  upstream_model_id: string;
-  provider: string;
-  provider_display_name: string;
-  display_name: string;
-  model_code: string;
-  category: string;
-  capability_type: string;
-  billing_mode: string;
-  pricing_items: PricingItem[];
-  description: string;
-  support_features: string[];
-  tags: string[];
-  input_price_per_million: string | null;
-  output_price_per_million: string | null;
-  owned_by: string;
-  is_available: boolean;
-  is_imported: boolean;
-  last_synced_at: string;
-};
-
 export type ModelPriceSnapshot = {
   id: number;
   model_catalog_id: number;

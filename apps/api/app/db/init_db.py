@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import Base, SessionLocal, engine
-from app.models import ApiKey, BailianModelCache, ModelCatalog, ModelPriceSnapshot, RefundRequest, User, WalletAccount
+from app.models import ApiKey, ModelCatalog, ModelPriceSnapshot, RefundRequest, User, WalletAccount
 from app.services.official_model_catalog import OFFICIAL_MODEL_CATALOG
 
 def sync_official_model_catalog(db: Session):
@@ -52,27 +52,6 @@ def sync_official_model_catalog(db: Session):
             )
         )
 
-    existing_cache = {
-        row.upstream_model_id.lower(): row
-        for row in db.query(BailianModelCache).all()
-    }
-    for model_code, item in OFFICIAL_MODEL_CATALOG.items():
-        cache_item = existing_cache.get(model_code.lower())
-        if not cache_item:
-            continue
-        cache_item.display_name = item["display_name"]
-        cache_item.provider = item["provider"]
-        cache_item.vendor_display_name = item["vendor_display_name"]
-        cache_item.category = item["category"]
-        cache_item.capability_type = item["capability_type"]
-        cache_item.description = item["description"]
-        cache_item.tags = item["tags"]
-        cache_item.support_features = item["support_features"]
-        cache_item.billing_mode = item["billing_mode"]
-        cache_item.pricing_items = item["pricing_items"]
-        cache_item.input_price_per_million = item["input_price_per_million"]
-        cache_item.output_price_per_million = item["output_price_per_million"]
-
 def prune_to_official_models(db: Session):
     official_codes = set(OFFICIAL_MODEL_CATALOG.keys())
     (
@@ -81,7 +60,6 @@ def prune_to_official_models(db: Session):
         .delete(synchronize_session=False)
     )
     db.query(ModelPriceSnapshot).delete(synchronize_session=False)
-    db.query(BailianModelCache).delete(synchronize_session=False)
 
 
 def seed_admin(db: Session):
@@ -182,19 +160,13 @@ def initialize_database():
         if "sync_error" in model_columns:
             db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_error"))
             db.commit()
-        bailian_cache_columns = {column["name"] for column in inspector.get_columns("bailian_model_cache")}
-        if "billing_mode" not in bailian_cache_columns:
-            db.execute(text("ALTER TABLE bailian_model_cache ADD COLUMN billing_mode VARCHAR(32) NOT NULL DEFAULT 'token'"))
-            db.commit()
-        if "pricing_items" not in bailian_cache_columns:
-            db.execute(text("ALTER TABLE bailian_model_cache ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
-            db.commit()
-        if "price_source" in bailian_cache_columns:
-            db.execute(text("ALTER TABLE bailian_model_cache DROP COLUMN price_source"))
-            db.commit()
         snapshot_columns = {column["name"] for column in inspector.get_columns("model_price_snapshots")}
         if "price_source" in snapshot_columns:
             db.execute(text("ALTER TABLE model_price_snapshots DROP COLUMN price_source"))
+            db.commit()
+        existing_tables = set(inspector.get_table_names())
+        if "bailian_model_cache" in existing_tables:
+            db.execute(text("DROP TABLE bailian_model_cache"))
             db.commit()
         usage_log_columns = {column["name"] for column in inspector.get_columns("usage_logs")}
         if "response_time_ms" not in usage_log_columns:

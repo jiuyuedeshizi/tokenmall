@@ -8,11 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_admin_user
 from app.db.session import get_db
-from app.models import ApiKey, BailianModelCache, ModelCatalog, ModelPriceSnapshot, PaymentOrder, RefundItem, RefundRequest, UsageLog, User, WalletAccount, WalletLedger
+from app.models import ApiKey, ModelCatalog, ModelPriceSnapshot, PaymentOrder, RefundItem, RefundRequest, UsageLog, User, WalletAccount, WalletLedger
 from app.schemas.admin import AdjustBalanceRequest, AdminResetPasswordRequest, CreateModelRequest, UpdateModelRequest
 from app.services.api_keys import delete_api_key as delete_api_key_service
 from app.services.auth import admin_reset_password
-from app.services.bailian_catalog import fetch_bailian_models, import_bailian_models, sync_prices_from_bailian_cache, upsert_bailian_cache
 from app.services.model_price_history import create_price_snapshot, create_price_snapshot_if_changed
 from app.services.official_model_catalog import get_official_model_examples
 from app.services.payments import create_payment_provider
@@ -40,18 +39,6 @@ def ensure_model_pricing_items(model: ModelCatalog) -> list[dict]:
         {"label": "输入", "unit": "元/百万Token", "price": str(model.input_price_per_million)},
         {"label": "输出", "unit": "元/百万Token", "price": str(model.output_price_per_million)},
     ]
-
-
-def ensure_cache_pricing_items(row: BailianModelCache) -> list[dict]:
-    items = parse_pricing_items(row.pricing_items)
-    if items:
-        return items
-    fallback = []
-    if row.input_price_per_million is not None:
-        fallback.append({"label": "输入", "unit": "元/百万Token", "price": str(row.input_price_per_million)})
-    if row.output_price_per_million is not None:
-        fallback.append({"label": "输出", "unit": "元/百万Token", "price": str(row.output_price_per_million)})
-    return fallback
 
 
 def build_default_pricing_items(input_price: Decimal, output_price: Decimal, billing_mode: str = "token") -> str:
@@ -111,31 +98,6 @@ def serialize_price_snapshot(row: ModelPriceSnapshot):
         "note": row.note,
         "created_at": row.created_at,
     }
-
-
-def serialize_bailian_cache_model(row: BailianModelCache, imported_codes: set[str]):
-    return {
-        "id": row.id,
-        "upstream_model_id": row.upstream_model_id,
-        "provider": row.provider,
-        "provider_display_name": row.provider_display_name,
-        "display_name": row.display_name,
-        "model_code": row.model_code,
-        "category": row.category,
-        "capability_type": row.capability_type,
-        "billing_mode": row.billing_mode,
-        "pricing_items": ensure_cache_pricing_items(row),
-        "description": row.description,
-        "support_features": [item.strip() for item in row.support_features.split(",") if item.strip()],
-        "tags": [item.strip() for item in row.tags.split(",") if item.strip()],
-        "input_price_per_million": row.input_price_per_million,
-        "output_price_per_million": row.output_price_per_million,
-        "owned_by": row.owned_by,
-        "is_available": row.is_available,
-        "last_synced_at": row.last_synced_at,
-        "is_imported": row.model_code in imported_codes or row.upstream_model_id in imported_codes,
-    }
-
 
 @router.get("/overview")
 def get_admin_overview(_: User = Depends(get_admin_user), db: Session = Depends(get_db)):
@@ -665,101 +627,6 @@ def list_models(
         "page": page,
         "page_size": page_size,
     }
-
-
-@router.get("/bailian-models")
-async def list_bailian_models(
-    sync: bool = Query(default=False),
-    keyword: str = Query(default=""),
-    capability_type: str = Query(default=""),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=12, ge=1, le=50),
-    _: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    if sync:
-        remote_items = await fetch_bailian_models()
-        upsert_bailian_cache(db, remote_items)
-        db.commit()
-
-    imported_codes = {row[0] for row in db.query(ModelCatalog.model_code).all()}
-    query = db.query(BailianModelCache).filter(BailianModelCache.is_available.is_(True))
-    keyword_value = keyword.strip()
-    if keyword_value:
-        like_value = f"%{keyword_value}%"
-        query = query.filter(
-            (BailianModelCache.display_name.ilike(like_value))
-            | (BailianModelCache.upstream_model_id.ilike(like_value))
-            | (BailianModelCache.model_code.ilike(like_value))
-        )
-    capability_value = capability_type.strip().lower()
-    if capability_value:
-        query = query.filter(BailianModelCache.capability_type == capability_value)
-    query = query.order_by(BailianModelCache.upstream_model_id.asc())
-    total = query.count()
-    rows = query.offset((page - 1) * page_size).limit(page_size).all()
-    return {
-        "items": [serialize_bailian_cache_model(row, imported_codes) for row in rows],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
-
-
-@router.post("/bailian-models/import")
-async def import_selected_bailian_models(
-    payload: dict,
-    _: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    upstream_ids = [str(item).strip() for item in payload.get("upstream_model_ids", []) if str(item).strip()]
-    if not upstream_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择要导入的模型")
-    existing_ids = {
-        row.model_code: row.id
-        for row in db.query(ModelCatalog.model_code, ModelCatalog.id).all()
-    }
-    models = import_bailian_models(db, upstream_ids)
-    for model in models:
-        if not existing_ids.get(model.model_code):
-            create_price_snapshot(
-                model=model,
-                note="从百炼导入模型时创建价格快照",
-                db=db,
-            )
-    db.commit()
-    return {"success": True, "count": len(models)}
-
-
-@router.post("/bailian-models/sync-prices")
-async def sync_bailian_model_prices(
-    _: User = Depends(get_admin_user),
-    db: Session = Depends(get_db),
-):
-    remote_items = await fetch_bailian_models()
-    upsert_bailian_cache(db, remote_items)
-    previous_prices = {
-        row.id: (
-            Decimal(row.input_price_per_million),
-            Decimal(row.output_price_per_million),
-        )
-        for row in db.query(ModelCatalog).all()
-    }
-    updated = sync_prices_from_bailian_cache(db)
-    for model in db.query(ModelCatalog).all():
-        old = previous_prices.get(model.id)
-        if not old:
-            continue
-        create_price_snapshot_if_changed(
-            model=model,
-            old_input_price=old[0],
-            old_output_price=old[1],
-            note="同步百炼价格后记录快照",
-            db=db,
-        )
-    db.commit()
-    return {"success": True, "updated": updated}
-
 
 @router.post("/models")
 def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user), db: Session = Depends(get_db)):

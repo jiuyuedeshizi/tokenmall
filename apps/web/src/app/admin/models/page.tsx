@@ -19,7 +19,7 @@ const initialForm = {
   category: "text",
   input_price_per_million: "2.5",
   output_price_per_million: "5",
-  pricing_items_json: "",
+  pricing_items: [] as PricingItem[],
   rating: "4.8",
   description: "",
   hero_description: "",
@@ -61,27 +61,20 @@ const billingModeOptions = [
   { label: "按万字符计费", value: "per_10k_chars" },
 ];
 
-const formFields = [
-  { key: "display_name", label: "模型名称", type: "input", placeholder: "例如：Qwen3.5 27B" },
-  { key: "vendor_display_name", label: "提供商名称", type: "input", placeholder: "例如：Alibaba" },
-  { key: "provider", label: "模型提供商", type: "select" },
-  { key: "model_code", label: "平台模型编码", type: "input", placeholder: "例如：qwen-plus" },
-  { key: "model_id", label: "真实模型 ID", type: "input", placeholder: "例如：qwen-plus" },
-  { key: "capability_type", label: "能力类型", type: "select" },
-  { key: "billing_mode", label: "计费模式", type: "select" },
-  { key: "category", label: "模型分类", type: "select" },
-  { key: "input_price_per_million", label: "输入价格（每百万Token）", type: "input", placeholder: "例如：2.5" },
-  { key: "output_price_per_million", label: "输出价格（每百万Token）", type: "input", placeholder: "例如：5" },
-  { key: "pricing_items_json", label: "价格项配置", type: "textarea", placeholder: '例如：[{"label":"输入","unit":"元/百万Token","price":"0.8"}]' },
-  { key: "rating", label: "评分", type: "input", placeholder: "例如：4.8" },
-  { key: "description", label: "卡片简介", type: "textarea", placeholder: "用于模型库列表展示" },
-  { key: "hero_description", label: "详情介绍", type: "textarea", placeholder: "用于模型详情页顶部介绍" },
-  { key: "support_features", label: "支持功能", type: "input", placeholder: "多个功能用中文逗号分隔" },
-  { key: "tags", label: "标签", type: "input", placeholder: "多个标签用中文逗号分隔" },
-  { key: "example_python", label: "Python 示例", type: "textarea", placeholder: "可自定义 Python API 使用示例" },
-  { key: "example_typescript", label: "TypeScript 示例", type: "textarea", placeholder: "可自定义 TypeScript API 使用示例" },
-  { key: "example_curl", label: "cURL 示例", type: "textarea", placeholder: "可自定义 cURL API 使用示例" },
+const pricingPresetOptions = [
+  { label: "输入", unit: "元/百万Token" },
+  { label: "输出", unit: "元/百万Token" },
+  { label: "图片生成", unit: "元/张" },
+  { label: "语音识别", unit: "元/每秒" },
+  { label: "语音合成", unit: "元/每万字符" },
+  { label: "720P 无声", unit: "元/每秒" },
+  { label: "1080P 无声", unit: "元/每秒" },
+  { label: "720P 有声", unit: "元/每秒" },
+  { label: "1080P 有声", unit: "元/每秒" },
+  { label: "文本处理", unit: "元/每万字符" },
 ] as const;
+
+const CUSTOM_PRICING_LABEL = "__custom__";
 
 function normalizeCsv(value: string) {
   return value
@@ -106,24 +99,45 @@ function formatBillingMode(value: string) {
   return billingModeOptions.find((item) => item.value === value)?.label ?? value;
 }
 
-function parsePricingItemsInput(value: string): PricingItem[] {
-  const content = value.trim();
-  if (!content) {
-    return [];
-  }
-  const parsed = JSON.parse(content);
-  if (!Array.isArray(parsed)) {
-    throw new Error("价格项配置必须是数组 JSON");
-  }
-  return parsed.map((item) => ({
-    label: String(item.label ?? "").trim(),
-    unit: String(item.unit ?? "").trim(),
-    price: String(item.price ?? "").trim(),
-  })).filter((item) => item.label && item.unit && item.price);
+function normalizePricingItems(items: PricingItem[]) {
+  return items
+    .map((item) => ({
+      label: String(item.label ?? "").trim(),
+      unit: String(item.unit ?? "").trim(),
+      price: String(item.price ?? "").trim(),
+    }))
+    .filter((item) => item.label && item.unit && item.price);
 }
 
-function stringifyPricingItems(items: PricingItem[]) {
-  return items.length ? JSON.stringify(items, null, 2) : "";
+function getPresetUnit(label: string) {
+  return pricingPresetOptions.find((option) => option.label === label)?.unit ?? "";
+}
+
+function isPresetPricingLabel(label: string) {
+  return pricingPresetOptions.some((option) => option.label === label);
+}
+
+function getDefaultPricingItems(
+  billingMode: string,
+  inputPricePerMillion: string,
+  outputPricePerMillion: string,
+) {
+  switch (billingMode) {
+    case "per_image":
+      return [{ label: "图片生成", unit: "元/张", price: outputPricePerMillion || "0" }];
+    case "per_second":
+      return [
+        { label: "720P 无声", unit: "元/每秒", price: outputPricePerMillion || "0" },
+        { label: "1080P 无声", unit: "元/每秒", price: outputPricePerMillion || "0" },
+      ];
+    case "per_10k_chars":
+      return [{ label: "文本处理", unit: "元/每万字符", price: outputPricePerMillion || "0" }];
+    default:
+      return [
+        { label: "输入", unit: "元/百万Token", price: inputPricePerMillion || "0" },
+        { label: "输出", unit: "元/百万Token", price: outputPricePerMillion || "0" },
+      ];
+  }
 }
 
 function renderPricingSummary(items: PricingItem[]) {
@@ -139,11 +153,39 @@ export default function AdminModelsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showExampleSection, setShowExampleSection] = useState(false);
   const [notice, setNotice] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const inputClass = "h-[50px] w-full rounded-[18px] border border-[#dbe3ef] px-4 text-[15px] text-[#172033] outline-none";
+  const textareaClass = "min-h-[110px] w-full rounded-[18px] border border-[#dbe3ef] px-4 py-3 text-[15px] text-[#172033] outline-none";
+
+  function updateFormField<Key extends keyof typeof initialForm>(key: Key, value: (typeof initialForm)[Key]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function renderFieldHint(content: React.ReactNode) {
+    return (
+      <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
+        {content}
+      </div>
+    );
+  }
+
+  function renderSection(title: string, description: string, content: React.ReactNode) {
+    return (
+      <section className="rounded-[24px] border border-[#e5eaf3] bg-[#fcfdff] p-5">
+        <div className="mb-4">
+          <h3 className="text-[18px] font-semibold text-[#172033]">{title}</h3>
+          <p className="mt-1 text-[13px] leading-6 text-[#667085]">{description}</p>
+        </div>
+        <div className="grid gap-5 md:grid-cols-2">{content}</div>
+      </section>
+    );
+  }
+
   async function load() {
     const result = await apiFetch<PaginatedResponse<AdminModel>>(`/admin/models?page=${page}&page_size=${pageSize}`);
     setItems(result.items);
@@ -174,6 +216,7 @@ export default function AdminModelsPage() {
   function openCreateModal() {
     setEditingId(null);
     setForm(initialForm);
+    setShowExampleSection(false);
     setIsModalOpen(true);
   }
 
@@ -190,7 +233,7 @@ export default function AdminModelsPage() {
       category: item.category,
       input_price_per_million: item.input_price_per_million,
       output_price_per_million: item.output_price_per_million,
-      pricing_items_json: stringifyPricingItems(item.pricing_items),
+      pricing_items: item.pricing_items,
       rating: String(item.rating),
       description: item.description,
       hero_description: item.hero_description,
@@ -200,6 +243,7 @@ export default function AdminModelsPage() {
       example_typescript: item.example_typescript,
       example_curl: item.example_curl,
     });
+    setShowExampleSection(Boolean(item.example_python || item.example_typescript || item.example_curl));
     setIsModalOpen(true);
   }
 
@@ -207,6 +251,7 @@ export default function AdminModelsPage() {
     setIsModalOpen(false);
     setEditingId(null);
     setForm(initialForm);
+    setShowExampleSection(false);
     setSubmitting(false);
   }
 
@@ -217,8 +262,18 @@ export default function AdminModelsPage() {
         ...form,
         input_price_per_million: Number(form.input_price_per_million),
         output_price_per_million: Number(form.output_price_per_million),
-        pricing_items: parsePricingItemsInput(form.pricing_items_json),
+        pricing_items: normalizePricingItems(
+          form.pricing_items.length
+            ? form.pricing_items
+            : getDefaultPricingItems(
+                form.billing_mode,
+                form.input_price_per_million,
+                form.output_price_per_million,
+              )
+        ),
         rating: Number(form.rating),
+        description: form.description.trim(),
+        hero_description: form.hero_description.trim() || form.description.trim(),
         support_features: normalizeCsv(form.support_features),
         tags: normalizeCsv(form.tags),
         example_python: form.example_python,
@@ -244,6 +299,36 @@ export default function AdminModelsPage() {
       setNotice(error instanceof Error ? error.message : "保存失败");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function resolveActivePricingItems(currentForm = form) {
+    return currentForm.pricing_items.length
+      ? currentForm.pricing_items
+      : getDefaultPricingItems(
+          currentForm.billing_mode,
+          currentForm.input_price_per_million,
+          currentForm.output_price_per_million,
+        );
+  }
+
+  function updatePricingItems(updater: (items: PricingItem[]) => PricingItem[]) {
+    setForm((prev) => ({
+      ...prev,
+      pricing_items: updater(resolveActivePricingItems(prev)),
+    }));
+  }
+
+  function createSuggestedPricingItem(billingMode: string) {
+    switch (billingMode) {
+      case "per_image":
+        return { label: "图片生成", unit: "元/张", price: "" };
+      case "per_second":
+        return { label: "720P 无声", unit: "元/每秒", price: "" };
+      case "per_10k_chars":
+        return { label: "文本处理", unit: "元/每万字符", price: "" };
+      default:
+        return { label: "输入", unit: "元/百万Token", price: "" };
     }
   }
 
@@ -392,14 +477,14 @@ export default function AdminModelsPage() {
 
           {isModalOpen ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172033]/35 px-4">
-              <div className="max-h-[88vh] w-full max-w-[880px] overflow-y-auto rounded-[28px] bg-white shadow-[0_32px_80px_rgba(15,23,42,0.18)]">
+              <div className="max-h-[88vh] w-full max-w-[980px] overflow-y-auto rounded-[28px] bg-white shadow-[0_32px_80px_rgba(15,23,42,0.18)]">
                 <div className="flex items-center justify-between border-b border-[#e5eaf3] px-8 py-6">
                   <div>
                     <h2 className="text-[28px] font-semibold text-[#172033]">
                       {editingId ? "编辑模型" : "新增模型"}
                     </h2>
                     <p className="mt-2 text-[15px] text-[#667085]">
-                      请使用中文业务字段填写模型信息，配置完成后会同步到前台模型库与详情页。
+                      表单已按基础信息、计费配置、展示文案和示例代码分组，优先填写必要字段即可。
                     </p>
                   </div>
                   <button
@@ -411,94 +496,412 @@ export default function AdminModelsPage() {
                   </button>
                 </div>
 
-                <div className="grid gap-5 px-8 py-7 md:grid-cols-2">
-                  {formFields.map((field) => (
-                    <label
-                      key={field.key}
-                      className={field.type === "textarea" ? "block md:col-span-2" : "block"}
-                    >
-                      <div className="mb-2 text-[14px] font-medium text-[#4d596a]">{field.label}</div>
-                      {field.type === "textarea" ? (
-                        <textarea
-                          className={`min-h-[110px] w-full rounded-[18px] border border-[#dbe3ef] px-4 py-3 text-[15px] text-[#172033] outline-none ${
-                            field.key.startsWith("example_") ? "font-mono leading-7" : ""
-                          }`}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
-                          }
-                          placeholder={field.placeholder}
-                          value={form[field.key]}
+                <div className="space-y-5 px-8 py-7">
+                  <div className="rounded-[22px] border border-[#dbe3ef] bg-[#f7f9fc] px-5 py-4">
+                    <div className="flex flex-wrap items-center gap-2 text-[13px] text-[#667085]">
+                      <span className="rounded-full bg-white px-3 py-1 text-[#172033]">平台编码：{form.model_code || "未填写"}</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-[#172033]">上游 ID：{form.model_id || "未填写"}</span>
+                      <span className="rounded-full bg-white px-3 py-1 text-[#172033]">计费方式：{formatBillingMode(form.billing_mode)}</span>
+                    </div>
+                  </div>
+
+                  {renderSection(
+                    "基础信息",
+                    "先确定展示名称、供应商和模型编码，这一组是最常编辑的基础字段。",
+                    <>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">模型名称</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("display_name", event.target.value)}
+                          placeholder="例如：Qwen3.5 27B"
+                          value={form.display_name}
                         />
-                      ) : field.type === "select" ? (
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">模型提供商</div>
                         <select
-                          className="h-[50px] w-full rounded-[18px] border border-[#dbe3ef] px-4 text-[15px] text-[#172033] outline-none"
-                          onChange={(event) =>
-                            setForm((prev) => {
-                              const nextValue = event.target.value;
-                              if (field.key === "provider") {
-                                const matched = providerOptions.find((item) => item.value === nextValue);
-                                return {
-                                  ...prev,
-                                  provider: nextValue,
-                                  vendor_display_name: matched?.vendor ?? prev.vendor_display_name,
-                                };
-                              }
-                              return { ...prev, [field.key]: nextValue };
-                            })
-                          }
-                          value={form[field.key]}
+                          className={inputClass}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            const matched = providerOptions.find((item) => item.value === nextValue);
+                            setForm((prev) => ({
+                              ...prev,
+                              provider: nextValue,
+                              vendor_display_name: matched?.vendor ?? prev.vendor_display_name,
+                            }));
+                          }}
+                          value={form.provider}
                         >
-                          {(field.key === "provider"
-                            ? providerOptions
-                            : field.key === "capability_type"
-                              ? capabilityOptions
-                              : field.key === "billing_mode"
-                                ? billingModeOptions
-                              : categoryOptions
-                          ).map((option) => (
+                          {providerOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
                           ))}
                         </select>
-                      ) : (
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">厂商展示名</div>
                         <input
-                          className="h-[50px] w-full rounded-[18px] border border-[#dbe3ef] px-4 text-[15px] text-[#172033] outline-none"
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
-                          }
-                          placeholder={field.placeholder}
-                          value={form[field.key]}
+                          className={inputClass}
+                          onChange={(event) => updateFormField("vendor_display_name", event.target.value)}
+                          placeholder="例如：Alibaba"
+                          value={form.vendor_display_name}
                         />
-                      )}
-                      {field.key === "model_id" ? (
-                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          这里只填透明代理实际转发用的上游模型 ID，例如 <span className="font-semibold text-[#172033]">qwen-plus</span>。
-                          当前系统要求它与平台模型编码保持一致。
-                        </div>
+                        {renderFieldHint("通常保持系统自动带出的默认值即可，只有前台展示需要特殊文案时再修改。")}
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">模型分类</div>
+                        <select
+                          className={inputClass}
+                          onChange={(event) => updateFormField("category", event.target.value)}
+                          value={form.category}
+                        >
+                          {categoryOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">平台模型编码</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("model_code", event.target.value)}
+                          placeholder="例如：qwen-plus"
+                          value={form.model_code}
+                        />
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">上游模型 ID</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("model_id", event.target.value)}
+                          placeholder="例如：qwen-plus"
+                          value={form.model_id}
+                        />
+                        {renderFieldHint(
+                          <>
+                            透明代理当前要求 <span className="font-semibold text-[#172033]">平台模型编码</span> 与 <span className="font-semibold text-[#172033]">上游模型 ID</span> 保持一致。
+                          </>
+                        )}
+                      </label>
+                    </>
+                  )}
+
+                  {renderSection(
+                    "能力与计费",
+                    "这一组决定模型的调用入口、价格展示方式和后台筛选标签。",
+                    <>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">能力类型</div>
+                        <select
+                          className={inputClass}
+                          onChange={(event) => updateFormField("capability_type", event.target.value)}
+                          value={form.capability_type}
+                        >
+                          {capabilityOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {renderFieldHint(
+                          <>
+                            对话走 <span className="font-semibold text-[#172033]">chat/completions</span>，图像/音频走 <span className="font-semibold text-[#172033]">multimodal-generation</span>，视频走 <span className="font-semibold text-[#172033]">video-synthesis</span>，向量走 <span className="font-semibold text-[#172033]">embeddings</span>。
+                          </>
+                        )}
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">评分</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("rating", event.target.value)}
+                          placeholder="例如：4.8"
+                          value={form.rating}
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {renderSection(
+                    "价格信息",
+                    "计费模式和价格展示都放在这里维护。大多数情况下不需要写 JSON，按行添加价格项就可以。",
+                    <>
+                      <label className="block md:col-span-2">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">计费模式</div>
+                        <select
+                          className={inputClass}
+                          onChange={(event) => {
+                            const nextBillingMode = event.target.value;
+                            setForm((prev) => ({
+                              ...prev,
+                              billing_mode: nextBillingMode,
+                              pricing_items: getDefaultPricingItems(
+                                nextBillingMode,
+                                prev.input_price_per_million,
+                                prev.output_price_per_million,
+                              ),
+                            }));
+                          }}
+                          value={form.billing_mode}
+                        >
+                          {billingModeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {renderFieldHint("文本模型通常选择按 Token 计费；图片、音频、视频模型优先按张、按秒或按万字符维护。")}
+                      </label>
+                      {form.billing_mode === "token" ? (
+                        <>
+                          <label className="block">
+                            <div className="mb-2 text-[14px] font-medium text-[#4d596a]">输入价格（每百万Token）</div>
+                            <input
+                              className={inputClass}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setForm((prev) => ({
+                                  ...prev,
+                                  input_price_per_million: nextValue,
+                                  pricing_items:
+                                    prev.billing_mode === "token" && prev.pricing_items.length <= 2
+                                      ? prev.pricing_items.map((item) =>
+                                          item.label === "输入" ? { ...item, price: nextValue } : item
+                                        )
+                                      : prev.pricing_items,
+                                }));
+                              }}
+                              placeholder="例如：2.5"
+                              value={form.input_price_per_million}
+                            />
+                          </label>
+                          <label className="block">
+                            <div className="mb-2 text-[14px] font-medium text-[#4d596a]">输出价格（每百万Token）</div>
+                            <input
+                              className={inputClass}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setForm((prev) => ({
+                                  ...prev,
+                                  output_price_per_million: nextValue,
+                                  pricing_items:
+                                    prev.pricing_items.length <= 2
+                                      ? prev.pricing_items.map((item) =>
+                                          item.label === "输出" ? { ...item, price: nextValue } : item
+                                        )
+                                      : prev.pricing_items,
+                                }));
+                              }}
+                              placeholder="例如：5"
+                              value={form.output_price_per_million}
+                            />
+                          </label>
+                        </>
                       ) : null}
-                      {field.key === "capability_type" ? (
-                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          能力类型决定模型探活和调用入口。对话会走 <span className="font-semibold text-[#172033]">chat/completions</span>，图像/音频会走 <span className="font-semibold text-[#172033]">multimodal-generation</span>，视频会走 <span className="font-semibold text-[#172033]">video-synthesis</span>，向量会走 <span className="font-semibold text-[#172033]">embeddings</span>。
+                      <label className="block md:col-span-2">
+                        <div className="mb-3 flex items-center justify-between">
+                          <div className="text-[14px] font-medium text-[#4d596a]">价格项配置</div>
+                          <button
+                            className="rounded-full border border-[#dbe3ef] px-3 py-1 text-[12px] font-semibold text-[#315efb]"
+                            onClick={() => updatePricingItems((items) => [...items, createSuggestedPricingItem(form.billing_mode)])}
+                            type="button"
+                          >
+                            添加价格项
+                          </button>
                         </div>
-                      ) : null}
-                      {field.key === "billing_mode" ? (
-                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          计费模式用于前后台展示和后续扩展计费器。文本模型优先选择 <span className="font-semibold text-[#172033]">按 Token 计费</span>。
+                        <div className="space-y-3">
+                          {resolveActivePricingItems().map((item, index) => {
+                            const isCustom = !isPresetPricingLabel(item.label);
+                            const selectValue = isCustom ? CUSTOM_PRICING_LABEL : item.label;
+
+                            return (
+                            <div
+                              key={`${item.label}-${index}`}
+                              className="grid gap-3 rounded-[18px] border border-[#dbe3ef] bg-white p-4 md:grid-cols-[1.2fr_1fr_0.8fr_auto]"
+                            >
+                              <div className="space-y-3">
+                                <select
+                                  className={inputClass}
+                                  onChange={(event) =>
+                                    updatePricingItems((items) =>
+                                      items.map((current, currentIndex) =>
+                                        currentIndex === index
+                                          ? event.target.value === CUSTOM_PRICING_LABEL
+                                            ? { ...current, label: current.label && isPresetPricingLabel(current.label) ? "" : current.label, unit: current.unit && isPresetPricingLabel(current.label) ? "" : current.unit }
+                                            : {
+                                                ...current,
+                                                label: event.target.value,
+                                                unit: getPresetUnit(event.target.value),
+                                              }
+                                          : current
+                                      )
+                                    )
+                                  }
+                                  value={selectValue}
+                                >
+                                  {pricingPresetOptions.map((option) => (
+                                    <option key={option.label} value={option.label}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                  <option value={CUSTOM_PRICING_LABEL}>自定义</option>
+                                </select>
+                                {isCustom ? (
+                                  <input
+                                    className={inputClass}
+                                    onChange={(event) =>
+                                      updatePricingItems((items) =>
+                                        items.map((current, currentIndex) =>
+                                          currentIndex === index ? { ...current, label: event.target.value } : current
+                                        )
+                                      )
+                                    }
+                                    placeholder="自定义名称，例如：4K 有声"
+                                    value={item.label}
+                                  />
+                                ) : null}
+                              </div>
+                              <div className="space-y-3">
+                                <input
+                                  className={`${inputClass} ${isCustom ? "" : "bg-[#f7f9fc] text-[#667085]"}`}
+                                  onChange={(event) =>
+                                    updatePricingItems((items) =>
+                                      items.map((current, currentIndex) =>
+                                        currentIndex === index ? { ...current, unit: event.target.value } : current
+                                      )
+                                    )
+                                  }
+                                  placeholder="单位，例如：元/每秒"
+                                  readOnly={!isCustom}
+                                  value={item.unit}
+                                />
+                                {!isCustom ? (
+                                  <div className="px-1 text-[12px] text-[#98a2b3]">预设项会自动带出单位。</div>
+                                ) : null}
+                              </div>
+                              <input
+                                className={inputClass}
+                                onChange={(event) =>
+                                  updatePricingItems((items) =>
+                                    items.map((current, currentIndex) =>
+                                      currentIndex === index ? { ...current, price: event.target.value } : current
+                                    )
+                                  )
+                                }
+                                placeholder="价格"
+                                value={item.price}
+                              />
+                              <button
+                                className="rounded-[14px] border border-[#ef4444] px-3 py-2 text-[13px] font-semibold text-[#ef4444]"
+                                onClick={() => updatePricingItems((items) => items.filter((_, currentIndex) => currentIndex !== index))}
+                                type="button"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          );
+                          })}
                         </div>
-                      ) : null}
-                      {field.key === "pricing_items_json" ? (
-                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          这里填写价格项数组 JSON，用于展示文档中的详细价格，例如输入/输出、按张或按秒等计费项。
-                        </div>
-                      ) : null}
-                      {field.key.startsWith("example_") ? (
-                        <div className="mt-2 rounded-[14px] bg-[#f8fbff] px-4 py-3 text-[12px] leading-6 text-[#667085]">
-                          详情页会优先显示这里配置的示例；留空时，系统会自动回退到后台预置示例。建议在这里维护更贴近业务场景的调用代码。
-                        </div>
-                      ) : null}
-                    </label>
-                  ))}
+                        {renderFieldHint("优先选择预设名称，系统会自动带出单位；只有遇到特殊档位时再切到“自定义”。大多数情况下你只需要调整价格。")}
+                      </label>
+                    </>
+                  )}
+
+                  {renderSection(
+                    "展示文案",
+                    "这里是前台模型卡片和详情页直接会看到的内容，能少填就别重复填。",
+                    <>
+                      <label className="block md:col-span-2">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">卡片简介</div>
+                        <textarea
+                          className={textareaClass}
+                          onChange={(event) => updateFormField("description", event.target.value)}
+                          placeholder="用于模型库列表展示"
+                          value={form.description}
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">详情介绍</div>
+                        <textarea
+                          className={textareaClass}
+                          onChange={(event) => updateFormField("hero_description", event.target.value)}
+                          placeholder="留空时默认使用卡片简介"
+                          value={form.hero_description}
+                        />
+                        {renderFieldHint("如果详情页顶部文案和列表简介差不多，可以直接留空，保存时会自动沿用卡片简介。")}
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">支持功能</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("support_features", event.target.value)}
+                          placeholder="多个功能用中文逗号分隔"
+                          value={form.support_features}
+                        />
+                      </label>
+                      <label className="block">
+                        <div className="mb-2 text-[14px] font-medium text-[#4d596a]">标签</div>
+                        <input
+                          className={inputClass}
+                          onChange={(event) => updateFormField("tags", event.target.value)}
+                          placeholder="多个标签用中文逗号分隔"
+                          value={form.tags}
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  <section className="rounded-[24px] border border-[#e5eaf3] bg-[#fcfdff] p-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-[18px] font-semibold text-[#172033]">示例代码</h3>
+                        <p className="mt-1 text-[13px] leading-6 text-[#667085]">
+                          只在需要覆盖默认示例时填写。留空会自动回退到系统内置示例。
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-full border border-[#dbe3ef] px-4 py-2 text-[13px] font-semibold text-[#315efb]"
+                        onClick={() => setShowExampleSection((prev) => !prev)}
+                        type="button"
+                      >
+                        {showExampleSection ? "收起示例代码" : "展开示例代码"}
+                      </button>
+                    </div>
+                    {showExampleSection ? (
+                      <div className="mt-5 grid gap-5 md:grid-cols-2">
+                        <label className="block md:col-span-2">
+                          <div className="mb-2 text-[14px] font-medium text-[#4d596a]">Python 示例</div>
+                          <textarea
+                            className={`${textareaClass} font-mono leading-7`}
+                            onChange={(event) => updateFormField("example_python", event.target.value)}
+                            placeholder="可自定义 Python API 使用示例"
+                            value={form.example_python}
+                          />
+                        </label>
+                        <label className="block md:col-span-2">
+                          <div className="mb-2 text-[14px] font-medium text-[#4d596a]">TypeScript 示例</div>
+                          <textarea
+                            className={`${textareaClass} font-mono leading-7`}
+                            onChange={(event) => updateFormField("example_typescript", event.target.value)}
+                            placeholder="可自定义 TypeScript API 使用示例"
+                            value={form.example_typescript}
+                          />
+                        </label>
+                        <label className="block md:col-span-2">
+                          <div className="mb-2 text-[14px] font-medium text-[#4d596a]">cURL 示例</div>
+                          <textarea
+                            className={`${textareaClass} font-mono leading-7`}
+                            onChange={(event) => updateFormField("example_curl", event.target.value)}
+                            placeholder="可自定义 cURL API 使用示例"
+                            value={form.example_curl}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </section>
                 </div>
 
                 <div className="flex justify-end gap-3 border-t border-[#e5eaf3] px-8 py-5">
