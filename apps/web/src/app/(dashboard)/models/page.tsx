@@ -77,6 +77,14 @@ function ModelIcon() {
   );
 }
 
+function MultimodalBadge() {
+  return (
+    <span className="rounded-full bg-[#e8f7ee] px-3 py-1 text-[13px] font-semibold text-[#0f9f57]">
+      已支持多模态 Chat
+    </span>
+  );
+}
+
 export default function ModelsPage() {
   const [items, setItems] = useState<ModelInfo[]>([]);
   const [search, setSearch] = useState("");
@@ -169,6 +177,11 @@ export default function ModelsPage() {
 
               <h3 className="mt-7 text-[24px] font-semibold text-[#172033]">{item.display_name}</h3>
               <div className="mt-2 text-[16px] text-[#667085]">by {item.vendor_display_name}</div>
+              {item.supports_multimodal_chat ? (
+                <div className="mt-3">
+                  <MultimodalBadge />
+                </div>
+              ) : null}
               <p className="mt-5 min-h-[78px] text-[16px] leading-8 text-[#4d596a]">
                 {item.description}
               </p>

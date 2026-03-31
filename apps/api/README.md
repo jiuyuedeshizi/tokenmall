@@ -6,7 +6,7 @@ FastAPI 业务后端，负责：
 - 钱包余额与账本
 - 充值订单与模拟支付
 - API Key 生成、限额与启停
-- 代理 LiteLLM 调用阿里百炼
+- 透明代理官方 OpenAI-compatible provider
 - 按 token 实时扣费
 - 管理员用户、订单、密钥管理
 

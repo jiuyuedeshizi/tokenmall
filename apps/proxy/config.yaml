@@ -1,2 +1,3 @@
+# LEGACY_COMPONENT: previous LiteLLM config kept only for reference during proxy refactor.
 general_settings:
   master_key: sk-tokenmall-master

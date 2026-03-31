@@ -8,6 +8,22 @@ import { Panel } from "@/components/panel";
 import { apiFetch } from "@/lib/api";
 import type { AdminUsage, PaginatedResponse } from "@/types";
 
+function formatBillingSource(value?: string) {
+  if (value === "provider_usage") {
+    return "官方 usage";
+  }
+  if (value === "estimated_stream") {
+    return "流式估算";
+  }
+  if (value === "error") {
+    return "错误回滚";
+  }
+  if (value === "reserved_estimate") {
+    return "预扣估算";
+  }
+  return value || "未标记";
+}
+
 export default function AdminUsagePage() {
   const [items, setItems] = useState<AdminUsage[]>([]);
   const [page, setPage] = useState(1);
@@ -49,6 +65,7 @@ export default function AdminUsagePage() {
                     <div className="text-right text-sm text-[#667085]">
                       <div>{new Date(item.created_at).toLocaleString("zh-CN")}</div>
                       <div className="mt-1">{item.status}</div>
+                      <div className="mt-1">{formatBillingSource(item.billing_source)}</div>
                     </div>
                   </div>
                   <div className="mt-4 grid gap-3 text-sm text-[#4d596a] md:grid-cols-4">

@@ -50,3 +50,4 @@ yarn-error.log*
 
 # local tool state
 .claude/
+.noop

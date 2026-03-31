@@ -1,6 +1,6 @@
 # TokenMall MVP
 
-基于 `Next.js + FastAPI + PostgreSQL + Docker + LiteLLM` 的 token 售卖与 API 管理平台。
+基于 `Next.js + FastAPI + PostgreSQL + Docker` 的 token 售卖与 API 管理平台。
 
 ## 功能
 
@@ -10,7 +10,7 @@
 - 模型库展示
 - 使用历史与账单
 - 管理员查看用户、订单、API Key
-- 通过 `/v1/chat/completions` 代理阿里百炼模型并按 token 实时扣费
+- 通过 `/v1/chat/completions` 透明代理官方 OpenAI-compatible 模型接口并按 token 实时扣费
 
 ## 本地开发
 
@@ -26,11 +26,12 @@ cp .env.example .env
 
 ```env
 BAILIAN_API_KEY=你的阿里百炼API Key
+TENCENT_API_KEY=你的腾讯API Key（如需启用腾讯 provider）
 ```
 
 ### 2. 启动依赖服务
 
-只启动 `PostgreSQL / Redis / LiteLLM`。这个命令会使用 [docker-compose.dev.yml](/Users/jh/projects/tokenmall/infra/docker/docker-compose.dev.yml)：
+只启动 `PostgreSQL / Redis`。这个命令会使用 [docker-compose.dev.yml](/Users/jh/projects/tokenmall/infra/docker/docker-compose.dev.yml)：
 
 ```bash
 pnpm dev:deps
@@ -40,7 +41,6 @@ pnpm dev:deps
 
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
-- LiteLLM: `http://localhost:4000`
 
 停止依赖服务：
 
@@ -121,4 +121,4 @@ curl http://localhost:8000/v1/chat/completions \
 - 当前支付链路为 MVP 模拟支付，保留了真实支付订单结构
 - 模型价格来自本地种子数据，可继续扩展
 - API Key 明文只在创建时返回一次
-- 推荐开发模式是：本机跑 `web/api`，Docker 只跑 `postgres/redis/litellm`
+- 推荐开发模式是：本机跑 `web/api`，Docker 只跑 `postgres/redis`

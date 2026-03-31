@@ -1,3 +1,4 @@
+# LEGACY_COMPONENT: LiteLLM provider-prefix mapping is preserved only for compatibility during refactor.
 from __future__ import annotations
 
 

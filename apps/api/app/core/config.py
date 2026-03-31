@@ -18,13 +18,15 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     jwt_secret: str = Field(default="change-me-jwt-secret", alias="JWT_SECRET")
     jwt_expire_minutes: int = Field(default=60 * 24, alias="JWT_EXPIRE_MINUTES")
-    litellm_url: str = Field(default="http://localhost:4000", alias="LITELLM_URL")
-    litellm_master_key: str = Field(default="sk-tokenmall-master", alias="LITELLM_MASTER_KEY")
+    litellm_url: str = Field(default="", alias="LITELLM_URL")
+    litellm_master_key: str = Field(default="", alias="LITELLM_MASTER_KEY")
     bailian_api_key: str = Field(default="", alias="BAILIAN_API_KEY")
     bailian_api_base: str = Field(
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         alias="BAILIAN_API_BASE",
     )
+    tencent_api_key: str = Field(default="", alias="TENCENT_API_KEY")
+    tencent_api_base: str = Field(default="", alias="TENCENT_API_BASE")
     cors_origins_raw: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="CORS_ORIGINS",

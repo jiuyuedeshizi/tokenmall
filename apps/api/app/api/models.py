@@ -4,9 +4,9 @@ import json
 
 from app.db.session import get_db
 from app.models import ModelCatalog
-from app.services.model_providers import build_litellm_model_name
 
 router = APIRouter()
+MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5"}
 
 
 def split_csv(value: str) -> list[str]:
@@ -34,10 +34,17 @@ def ensure_pricing_items(row: ModelCatalog) -> list[dict]:
 
 
 def serialize_model(row: ModelCatalog):
+    supports_multimodal_chat = (
+        row.capability_type == "chat"
+        and (row.model_code or "").strip().lower() in MULTIMODAL_CHAT_MODELS
+    )
     return {
         "id": row.id,
         "provider": row.provider,
-        "litellm_model_name": build_litellm_model_name(row.provider, row.model_id or row.model_code),
+        "litellm_model_name": row.model_id or row.model_code,
+        "provider_model_name": row.model_id or row.model_code,
+        "upstream_model_id": row.model_id or row.model_code,
+        "supports_multimodal_chat": supports_multimodal_chat,
         "vendor_display_name": row.vendor_display_name or row.provider,
         "model_code": row.model_code,
         "model_id": row.model_id or row.model_code,

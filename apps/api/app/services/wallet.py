@@ -90,6 +90,7 @@ def create_usage_reservation(
     reserved_amount: Decimal,
     estimated_input_tokens: int,
     estimated_output_tokens: int,
+    billing_source: str = "reserved_estimate",
     db: Session,
 ) -> UsageReservation:
     account = db.execute(
@@ -113,6 +114,7 @@ def create_usage_reservation(
         reserved_amount=reserved_amount,
         estimated_input_tokens=estimated_input_tokens,
         estimated_output_tokens=estimated_output_tokens,
+        billing_source=billing_source,
         status="pending",
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
     )
@@ -154,6 +156,7 @@ def capture_usage_reservation(
     actual_amount: Decimal,
     description: str,
     reference_id: str,
+    billing_source: str = "provider_usage",
     db: Session,
 ) -> tuple[UsageReservation, WalletAccount]:
     reservation = db.execute(
@@ -176,6 +179,7 @@ def capture_usage_reservation(
     )
     reservation.status = "captured"
     reservation.actual_amount = actual_amount
+    reservation.billing_source = billing_source
 
     db.add(
         WalletLedger(

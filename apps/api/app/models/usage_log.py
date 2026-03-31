@@ -20,6 +20,7 @@ class UsageLog(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0.0000"), nullable=False)
+    billing_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     response_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error_message: Mapped[str] = mapped_column(String(255), default="", nullable=False)

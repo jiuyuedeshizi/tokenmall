@@ -13,13 +13,12 @@ from app.schemas.admin import AdjustBalanceRequest, AdminResetPasswordRequest, C
 from app.services.api_keys import delete_api_key as delete_api_key_service
 from app.services.auth import admin_reset_password
 from app.services.bailian_catalog import fetch_bailian_models, import_bailian_models, sync_prices_from_bailian_cache, upsert_bailian_cache
-from app.services.litellm_models import delete_model_from_litellm, sync_and_probe_model
 from app.services.model_price_history import create_price_snapshot, create_price_snapshot_if_changed
-from app.services.model_providers import build_litellm_model_name
 from app.services.payments import create_payment_provider
 from app.services.wallet import apply_balance_change, mark_order_paid
 
 router = APIRouter()
+MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5"}
 
 
 def parse_pricing_items(value: str | None) -> list[dict]:
@@ -70,10 +69,17 @@ def build_default_pricing_items(input_price: Decimal, output_price: Decimal, bil
 
 
 def serialize_model(model: ModelCatalog):
+    supports_multimodal_chat = (
+        model.capability_type == "chat"
+        and (model.model_code or "").strip().lower() in MULTIMODAL_CHAT_MODELS
+    )
     return {
         "id": model.id,
         "provider": model.provider,
-        "litellm_model_name": build_litellm_model_name(model.provider, model.model_id),
+        "litellm_model_name": model.model_id,
+        "provider_model_name": model.model_id,
+        "upstream_model_id": model.model_id,
+        "supports_multimodal_chat": supports_multimodal_chat,
         "model_code": model.model_code,
         "model_id": model.model_id,
         "capability_type": model.capability_type,
@@ -640,6 +646,7 @@ def list_usage_logs(
             "output_tokens": row.output_tokens,
             "total_tokens": row.total_tokens,
             "amount": row.amount,
+            "billing_source": row.billing_source,
             "status": row.status,
             "error_message": row.error_message,
             "created_at": row.created_at,
@@ -735,7 +742,9 @@ async def import_selected_bailian_models(
                 note="从百炼导入模型时创建价格快照",
                 db=db,
             )
-        sync_and_probe_model(model)
+        if model.is_active:
+            model.sync_status = "ready"
+            model.sync_error = ""
     db.commit()
     return {"success": True, "count": len(models)}
 
@@ -768,8 +777,9 @@ async def sync_bailian_model_prices(
             note="同步百炼价格后记录快照",
             db=db,
         )
-    for model in db.query(ModelCatalog).filter(ModelCatalog.is_active.is_(True)).all():
-        sync_and_probe_model(model)
+        if model.is_active:
+            model.sync_status = "ready"
+            model.sync_error = ""
     db.commit()
     return {"success": True, "updated": updated}
 
@@ -779,6 +789,8 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
     existing = db.query(ModelCatalog).filter(ModelCatalog.model_code == payload.model_code).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模型编码已存在")
+    if payload.model_code != payload.model_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="透明代理要求 model_id 与 model_code 完全一致")
     model = ModelCatalog(
         provider=payload.provider,
         model_code=payload.model_code,
@@ -806,7 +818,8 @@ def create_model(payload: CreateModelRequest, _: User = Depends(get_admin_user),
     db.flush()
     create_price_snapshot(model=model, price_source="manual", note="手动新增模型时创建价格快照", db=db)
     if model.is_active:
-        sync_and_probe_model(model)
+        model.sync_status = "ready"
+        model.sync_error = ""
     else:
         model.sync_status = "disabled"
         model.sync_error = ""
@@ -844,6 +857,8 @@ def update_model(
             setattr(model, key, json.dumps(value, ensure_ascii=False))
         else:
             setattr(model, key, value)
+    if model.model_code != model.model_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="透明代理要求 model_id 与 model_code 完全一致")
     if not model.pricing_items:
         model.pricing_items = build_default_pricing_items(
             Decimal(model.input_price_per_million),
@@ -851,9 +866,9 @@ def update_model(
             model.billing_mode,
         )
     if model.is_active:
-        sync_and_probe_model(model)
+        model.sync_status = "ready"
+        model.sync_error = ""
     else:
-        delete_model_from_litellm(model)
         model.sync_status = "disabled"
         model.sync_error = ""
     create_price_snapshot_if_changed(
@@ -875,7 +890,8 @@ def enable_model(model_id: int, _: User = Depends(get_admin_user), db: Session =
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     model.is_active = True
-    sync_and_probe_model(model)
+    model.sync_status = "ready"
+    model.sync_error = ""
     db.commit()
     return {"success": True}
 
@@ -886,7 +902,6 @@ def disable_model(model_id: int, _: User = Depends(get_admin_user), db: Session 
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     model.is_active = False
-    delete_model_from_litellm(model)
     model.sync_status = "disabled"
     model.sync_error = ""
     db.commit()
@@ -898,7 +913,6 @@ def delete_model(model_id: int, _: User = Depends(get_admin_user), db: Session =
     model = db.query(ModelCatalog).filter(ModelCatalog.id == model_id).first()
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
-    delete_model_from_litellm(model)
     db.delete(model)
     db.commit()
     return {"success": True}

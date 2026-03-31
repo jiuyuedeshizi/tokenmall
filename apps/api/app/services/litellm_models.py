@@ -1,3 +1,4 @@
+# LEGACY_COMPONENT: LiteLLM model sync/probe integration has been removed from runtime paths.
 from __future__ import annotations
 
 from decimal import Decimal

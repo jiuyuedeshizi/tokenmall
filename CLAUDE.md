@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-TokenMall 是一个基于 Next.js + FastAPI + PostgreSQL + Redis + Docker + LiteLLM 的 Token 售卖与 API 管理平台。
+TokenMall 是一个基于 Next.js + FastAPI + PostgreSQL + Redis + Docker 的 Token 售卖与 API 管理平台。
 
 ## 代码架构
 
@@ -17,7 +17,7 @@ tokenmall/
 ├── packages/       # 共享包 (billing, common, db, sdk)
 ├── infra/
 │   └── docker/     # Docker Compose 文件
-│       ├── docker-compose.dev.yml   # 本地开发 (PostgreSQL, Redis, LiteLLM)
+│       ├── docker-compose.dev.yml   # 本地开发 (PostgreSQL, Redis)
 │       └── docker-compose.yml       # 生产部署
 └── billing/, common/, db/, sdk/    # 预留包目录
 ```
@@ -26,7 +26,7 @@ tokenmall/
 
 ### 根目录 (monorepo)
 ```bash
-pnpm dev:deps        # 启动 Docker 依赖 (PostgreSQL, Redis, LiteLLM)
+pnpm dev:deps        # 启动 Docker 依赖 (PostgreSQL, Redis)
 pnpm dev:deps:down   # 停止 Docker 依赖
 pnpm dev:web         # 启动 Next.js 开发服务器 (http://localhost:3000)
 pnpm lint:web        # Lint web 应用
@@ -62,7 +62,7 @@ docker compose --env-file ../../.env up --build
 
 ## 核心依赖
 
-- **LiteLLM** (http://localhost:4000) - 阿里百炼模型代理
+- **Provider APIs** - 直连官方 OpenAI-compatible 接口
 - **PostgreSQL** (localhost:5432) - 主数据库
 - **Redis** (localhost:6379) - 缓存和会话
 
@@ -86,5 +86,5 @@ curl http://localhost:8000/v1/chat/completions \
 - **后端**: FastAPI (Python), SQLAlchemy, Alembic 数据库迁移
 - **数据库**: PostgreSQL + pg 驱动
 - **缓存**: Redis
-- **模型代理**: LiteLLM
+- **模型代理**: 官方 OpenAI-compatible 透明代理
 - **包管理器**: pnpm 10.28.2

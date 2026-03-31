@@ -50,6 +50,7 @@ class UsageReservation(Base):
     actual_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4))
     estimated_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    billing_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     error_message: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

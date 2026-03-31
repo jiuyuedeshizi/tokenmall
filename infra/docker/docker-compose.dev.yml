@@ -19,25 +19,5 @@ services:
     ports:
       - "6379:6379"
 
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: tokenmall-litellm
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      BAILIAN_API_KEY: ${BAILIAN_API_KEY}
-      OPENAI_API_KEY: ${BAILIAN_API_KEY}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-tokenmall-master}
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-      LITELLM_CONFIG: /app/config.yaml
-      LITELLM_ENABLE_ADMIN_API: "true"
-      STORE_MODEL_IN_DB: "true"
-    volumes:
-      - ../../apps/proxy/config.yaml:/app/config.yaml
-    command: ["--port", "4000", "--config", "/app/config.yaml"]
-    depends_on:
-      - postgres
-
 volumes:
   pgdata:

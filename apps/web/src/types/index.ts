@@ -77,6 +77,7 @@ export type UsageLog = {
   output_tokens: number;
   total_tokens: number;
   amount: string;
+  billing_source?: string;
   status: string;
   error_message: string;
   created_at: string;
@@ -126,6 +127,7 @@ export type ModelInfo = {
   id: number;
   provider: string;
   litellm_model_name?: string;
+  supports_multimodal_chat?: boolean;
   vendor_display_name: string;
   model_code: string;
   model_id: string;

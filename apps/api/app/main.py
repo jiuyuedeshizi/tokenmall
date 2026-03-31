@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exception_handlers import http_exception_handler
 
 from app.api.admin import router as admin_router
 from app.api.api_keys import router as api_keys_router
@@ -15,7 +17,7 @@ from app.api.usage import router as usage_router
 from app.api.wallet import router as wallet_router
 from app.core.config import settings
 from app.db.init_db import initialize_database
-from app.services.litellm_models import sync_active_models_to_litellm
+from app.services.proxy import build_openai_error_response, openai_error_from_http_exception
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +25,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    try:
-        sync_active_models_to_litellm()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("LiteLLM 模型自动同步失败：%s", exc)
     yield
 
 
@@ -54,3 +52,23 @@ app.include_router(proxy_router, prefix="/v1", tags=["proxy"])
 @app.get("/health")
 def healthcheck():
     return {"status": "ok"}
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_wrapper(request: Request, exc: HTTPException):
+    if request.url.path.startswith("/v1/"):
+        return openai_error_from_http_exception(exc)
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_wrapper(request: Request, exc: Exception):  # noqa: ARG001
+    if request.url.path.startswith("/v1/"):
+        logger.exception("Unhandled proxy error")
+        return build_openai_error_response(
+            status_code=500,
+            message="Internal server error",
+            error_type="server_error",
+        )
+    logger.exception("Unhandled application error")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})

@@ -302,6 +302,16 @@ console.log(data);`;
                   {item.rating.toFixed(1)}
                 </div>
               </div>
+              {item.supports_multimodal_chat ? (
+                <div>
+                  <div className="text-[#667085]">多模态 Chat</div>
+                  <div className="mt-2">
+                    <span className="rounded-full bg-[#e8f7ee] px-3 py-1 text-[13px] font-semibold text-[#0f9f57]">
+                      已验证支持图片输入
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </SideCard>
 

@@ -7,130 +7,92 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import Base, SessionLocal, engine
-from app.models import ApiKey, ModelCatalog, ModelPriceSnapshot, RefundRequest, User, WalletAccount
+from app.models import ApiKey, BailianModelCache, ModelCatalog, ModelPriceSnapshot, RefundRequest, User, WalletAccount
+from app.services.official_model_catalog import OFFICIAL_MODEL_CATALOG
 
-
-MODEL_SEEDS = [
-    {
-        "provider": "alibaba-bailian",
-        "model_code": "qwen-plus",
-        "model_id": "qwen-plus",
-        "capability_type": "chat",
-        "display_name": "Qwen3.5 27B",
-        "vendor_display_name": "Alibaba",
-        "category": "text",
-        "billing_mode": "token",
-        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"0.8"},{"label":"输出","unit":"元/百万Token","price":"4.8"}]',
-        "input_price_per_million": Decimal("0.80"),
-        "output_price_per_million": Decimal("4.80"),
-        "price_source": "official_doc",
-        "last_price_synced_at": datetime.now(timezone.utc),
-        "description": "强大的多模态AI模型，支持文本和图像处理",
-        "hero_description": "强大的多模态AI模型，支持文本和图像处理",
-        "rating": Decimal("4.80"),
-        "support_features": "多轮对话,代码生成,文本分析,翻译",
-        "tags": "多轮对话,代码生成,文本分析,翻译",
-        "example_python": "",
-        "example_typescript": "",
-        "example_curl": "",
-    },
-    {
-        "provider": "alibaba-bailian",
-        "model_code": "qwen-turbo",
-        "model_id": "qwen-turbo",
-        "capability_type": "chat",
-        "display_name": "Qwen Turbo",
-        "vendor_display_name": "Alibaba",
-        "category": "text",
-        "billing_mode": "token",
-        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"1.5"},{"label":"输出","unit":"元/百万Token","price":"3"}]',
-        "input_price_per_million": Decimal("1.50"),
-        "output_price_per_million": Decimal("3.00"),
-        "price_source": "seed",
-        "last_price_synced_at": datetime.now(timezone.utc),
-        "description": "低延迟低成本模型，适合高频调用与轻量场景",
-        "hero_description": "低延迟低成本模型，适合高频调用与轻量场景",
-        "rating": Decimal("4.70"),
-        "support_features": "多轮对话,高并发,快速响应,翻译",
-        "tags": "快速响应,低成本,高并发,翻译",
-        "example_python": "",
-        "example_typescript": "",
-        "example_curl": "",
-    },
-    {
-        "provider": "alibaba-bailian",
-        "model_code": "qwen-max",
-        "model_id": "qwen-max-latest",
-        "capability_type": "chat",
-        "display_name": "Qwen Max",
-        "vendor_display_name": "Alibaba",
-        "category": "text",
-        "billing_mode": "token",
-        "pricing_items": '[{"label":"输入","unit":"元/百万Token","price":"12"},{"label":"输出","unit":"元/百万Token","price":"36"}]',
-        "input_price_per_million": Decimal("12.00"),
-        "output_price_per_million": Decimal("36.00"),
-        "price_source": "seed",
-        "last_price_synced_at": datetime.now(timezone.utc),
-        "description": "旗舰模型，适用于复杂推理、生成和高质量问答",
-        "hero_description": "旗舰模型，适用于复杂推理、生成和高质量问答",
-        "rating": Decimal("4.90"),
-        "support_features": "复杂推理,多轮对话,代码生成,办公助手",
-        "tags": "复杂推理,旗舰模型,办公助手",
-        "example_python": "",
-        "example_typescript": "",
-        "example_curl": "",
-    },
-]
-
-
-def seed_models(db: Session):
-    existing_rows = {
-        row.model_code: row
-        for row in db.query(ModelCatalog).all()
-    }
-    for item in MODEL_SEEDS:
-        existing = existing_rows.get(item["model_code"])
+def sync_official_model_catalog(db: Session):
+    existing_models = {row.model_code: row for row in db.query(ModelCatalog).all()}
+    for model_code, item in OFFICIAL_MODEL_CATALOG.items():
+        existing = existing_models.get(model_code)
         if existing:
             existing.provider = item["provider"]
+            existing.model_id = model_code
+            existing.capability_type = item["capability_type"]
             existing.display_name = item["display_name"]
+            existing.vendor_display_name = item["vendor_display_name"]
             existing.category = item["category"]
             existing.billing_mode = item["billing_mode"]
             existing.pricing_items = item["pricing_items"]
             existing.input_price_per_million = item["input_price_per_million"]
             existing.output_price_per_million = item["output_price_per_million"]
             existing.price_source = item["price_source"]
-            existing.last_price_synced_at = item["last_price_synced_at"]
+            existing.last_price_synced_at = datetime.now(timezone.utc)
             existing.description = item["description"]
-            existing.is_active = True
-            existing.model_id = item["model_id"]
-            existing.capability_type = item.get("capability_type", "chat")
-            existing.vendor_display_name = item["vendor_display_name"]
-            existing.rating = item["rating"]
             existing.hero_description = item["hero_description"]
             existing.support_features = item["support_features"]
             existing.tags = item["tags"]
-            existing.example_python = item["example_python"]
-            existing.example_typescript = item["example_typescript"]
-            existing.example_curl = item["example_curl"]
             continue
-        db.add(ModelCatalog(**item))
 
-
-def backfill_model_price_snapshots(db: Session):
-    models = db.query(ModelCatalog).all()
-    for model in models:
-        exists = db.query(ModelPriceSnapshot.id).filter(ModelPriceSnapshot.model_catalog_id == model.id).first()
-        if exists:
-            continue
         db.add(
-            ModelPriceSnapshot(
-                model_catalog_id=model.id,
-                input_price_per_million=model.input_price_per_million,
-                output_price_per_million=model.output_price_per_million,
-                price_source=model.price_source or "seed",
-                note="系统初始化价格基线",
+            ModelCatalog(
+                provider=item["provider"],
+                model_code=model_code,
+                model_id=model_code,
+                capability_type=item["capability_type"],
+                display_name=item["display_name"],
+                vendor_display_name=item["vendor_display_name"],
+                category=item["category"],
+                billing_mode=item["billing_mode"],
+                pricing_items=item["pricing_items"],
+                input_price_per_million=item["input_price_per_million"],
+                output_price_per_million=item["output_price_per_million"],
+                price_source=item["price_source"],
+                last_price_synced_at=datetime.now(timezone.utc),
+                description=item["description"],
+                hero_description=item["hero_description"],
+                rating=Decimal("4.80"),
+                support_features=item["support_features"],
+                tags=item["tags"],
+                example_python="",
+                example_typescript="",
+                example_curl="",
+                is_active=True,
+                sync_status="ready",
+                sync_error="",
             )
         )
+
+    existing_cache = {
+        row.upstream_model_id.lower(): row
+        for row in db.query(BailianModelCache).all()
+    }
+    for model_code, item in OFFICIAL_MODEL_CATALOG.items():
+        cache_item = existing_cache.get(model_code.lower())
+        if not cache_item:
+            continue
+        cache_item.display_name = item["display_name"]
+        cache_item.provider = item["provider"]
+        cache_item.vendor_display_name = item["vendor_display_name"]
+        cache_item.category = item["category"]
+        cache_item.capability_type = item["capability_type"]
+        cache_item.description = item["description"]
+        cache_item.tags = item["tags"]
+        cache_item.support_features = item["support_features"]
+        cache_item.billing_mode = item["billing_mode"]
+        cache_item.pricing_items = item["pricing_items"]
+        cache_item.input_price_per_million = item["input_price_per_million"]
+        cache_item.output_price_per_million = item["output_price_per_million"]
+        cache_item.price_source = item["price_source"]
+
+def prune_to_official_models(db: Session):
+    official_codes = set(OFFICIAL_MODEL_CATALOG.keys())
+    (
+        db.query(ModelCatalog)
+        .filter(~ModelCatalog.model_code.in_(official_codes))
+        .delete(synchronize_session=False)
+    )
+    db.query(ModelPriceSnapshot).delete(synchronize_session=False)
+    db.query(BailianModelCache).delete(synchronize_session=False)
 
 
 def seed_admin(db: Session):
@@ -242,6 +204,13 @@ def initialize_database():
         if "response_time_ms" not in usage_log_columns:
             db.execute(text("ALTER TABLE usage_logs ADD COLUMN response_time_ms INTEGER"))
             db.commit()
+        if "billing_source" not in usage_log_columns:
+            db.execute(text("ALTER TABLE usage_logs ADD COLUMN billing_source VARCHAR(32) NOT NULL DEFAULT ''"))
+            db.commit()
+        reservation_columns = {column["name"] for column in inspector.get_columns("usage_reservations")}
+        if "billing_source" not in reservation_columns:
+            db.execute(text("ALTER TABLE usage_reservations ADD COLUMN billing_source VARCHAR(32) NOT NULL DEFAULT ''"))
+            db.commit()
         payment_order_columns = {column["name"] for column in inspector.get_columns("payment_orders")}
         if "channel_order_no" not in payment_order_columns:
             db.execute(text("ALTER TABLE payment_orders ADD COLUMN channel_order_no VARCHAR(128)"))
@@ -255,9 +224,9 @@ def initialize_database():
         if "qr_code_image" not in payment_order_columns:
             db.execute(text("ALTER TABLE payment_orders ADD COLUMN qr_code_image VARCHAR(5000)"))
             db.commit()
-        seed_models(db)
+        sync_official_model_catalog(db)
+        prune_to_official_models(db)
         seed_admin(db)
-        backfill_model_price_snapshots(db)
         db.commit()
     finally:
         db.close()
