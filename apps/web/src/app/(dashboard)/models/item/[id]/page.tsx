@@ -57,6 +57,366 @@ function ModelIcon() {
   );
 }
 
+function isBailianNativeImageModel(item: ModelInfo) {
+  return (
+    item.provider === "alibaba-bailian" &&
+    item.capability_type === "image" &&
+    (item.model_id === "qwen-image-2.0" || item.model_id === "qwen-image-2.0-pro")
+  );
+}
+
+function isChatCompatibleAsrModel(item: ModelInfo) {
+  return item.provider === "alibaba-bailian" && item.model_id === "qwen3-asr-flash";
+}
+
+function isBailianNativeTtsModel(item: ModelInfo) {
+  return item.provider === "alibaba-bailian" && item.model_id === "qwen3-tts-vd-2026-01-26";
+}
+
+function buildDefaultPythonSnippet(item: ModelInfo, baseUrl: string) {
+  if (isBailianNativeImageModel(item)) {
+    return [
+      "import requests",
+      "",
+      `url = "${baseUrl}/api/v1/services/aigc/multimodal-generation/generation"`,
+      "headers = {",
+      '    "Authorization": "Bearer YOUR_API_KEY",',
+      '    "Content-Type": "application/json"',
+      "}",
+      "data = {",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '        "messages": [',
+      "            {",
+      '                "role": "user",',
+      '                "content": [',
+      "                    {",
+      '                        "text": "一只戴围巾的橘猫，写实风格，干净背景。"',
+      "                    }",
+      "                ]",
+      "            }",
+      "        ]",
+      "    },",
+      '    "parameters": {',
+      '        "watermark": False,',
+      '        "size": "1024*1024"',
+      "    }",
+      "}",
+      "",
+      "response = requests.post(url, headers=headers, json=data)",
+      "print(response.json())",
+    ].join("\n");
+  }
+
+  if (isChatCompatibleAsrModel(item)) {
+    return [
+      "import requests",
+      "",
+      `url = "${baseUrl}/v1/chat/completions"`,
+      "headers = {",
+      '    "Authorization": "Bearer YOUR_API_KEY",',
+      '    "Content-Type": "application/json"',
+      "}",
+      "data = {",
+      `    "model": "${item.model_id}",`,
+      '    "messages": [',
+      "        {",
+      '            "role": "user",',
+      '            "content": [',
+      "                {",
+      '                    "type": "input_audio",',
+      '                    "input_audio": {',
+      '                        "data": "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"',
+      "                    }",
+      "                }",
+      "            ]",
+      "        }",
+      "    ],",
+      '    "stream": False,',
+      '    "asr_options": {',
+      '        "enable_itn": False',
+      "    }",
+      "}",
+      "",
+      "response = requests.post(url, headers=headers, json=data)",
+      "print(response.json())",
+    ].join("\n");
+  }
+
+  if (isBailianNativeTtsModel(item)) {
+    return [
+      "import requests",
+      "",
+      `url = "${baseUrl}/api/v1/services/aigc/multimodal-generation/generation"`,
+      "",
+      "# 非流式：直接拿到完整响应，再取 output.audio.data 或 output.audio.url",
+      "payload = {",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '        "text": "那我来给大家推荐一款T恤，这款呢真的是超级好看。",',
+      '        "voice": "myvoice",  # 替换为声音设计生成的专属音色',
+      '        "language_type": "Chinese"',
+      "    }",
+      "}",
+      "headers = {",
+      '    "Authorization": "Bearer YOUR_API_KEY",',
+      '    "Content-Type": "application/json"',
+      "}",
+      "response = requests.post(url, headers=headers, json=payload, timeout=120)",
+      "print(response.json())",
+      "",
+      "# 流式：增加 X-DashScope-SSE 请求头，逐段消费 SSE 事件",
+      "stream_headers = {**headers, 'X-DashScope-SSE': 'enable'}",
+      "with requests.post(url, headers=stream_headers, json=payload, stream=True, timeout=120) as stream_resp:",
+      "    for line in stream_resp.iter_lines(decode_unicode=True):",
+      "        if line:",
+      "            print(line)",
+    ].join("\n");
+  }
+
+  return [
+    "import requests",
+    "",
+    `url = "${baseUrl}/v1/chat/completions"`,
+    "headers = {",
+    '    "Authorization": "Bearer YOUR_API_KEY",',
+    '    "Content-Type": "application/json"',
+    "}",
+    "data = {",
+    `    "model": "${item.model_id}",`,
+    '    "messages": [{"role": "user", "content": "你好"}]',
+    "}",
+    "",
+    "response = requests.post(url, headers=headers, json=data)",
+    "print(response.json())",
+  ].join("\n");
+}
+
+function buildDefaultTypescriptSnippet(item: ModelInfo, baseUrl: string) {
+  if (isBailianNativeImageModel(item)) {
+    return [
+      `const response = await fetch('${baseUrl}/api/v1/services/aigc/multimodal-generation/generation', {`,
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY',",
+      "    'Content-Type': 'application/json'",
+      "  },",
+      "  body: JSON.stringify({",
+      `    model: '${item.model_id}',`,
+      "    input: {",
+      "      messages: [",
+      "        {",
+      "          role: 'user',",
+      "          content: [{ text: '一只戴围巾的橘猫，写实风格，干净背景。' }]",
+      "        }",
+      "      ]",
+      "    },",
+      "    parameters: {",
+      "      watermark: false,",
+      "      size: '1024*1024'",
+      "    }",
+      "  })",
+      "});",
+      "",
+      "const data = await response.json();",
+      "console.log(data);",
+    ].join("\n");
+  }
+
+  if (isChatCompatibleAsrModel(item)) {
+    return [
+      `const response = await fetch('${baseUrl}/v1/chat/completions', {`,
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY',",
+      "    'Content-Type': 'application/json'",
+      "  },",
+      "  body: JSON.stringify({",
+      `    model: '${item.model_id}',`,
+      "    messages: [",
+      "      {",
+      "        role: 'user',",
+      "        content: [",
+      "          {",
+      "            type: 'input_audio',",
+      "            input_audio: {",
+      "              data: 'https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3'",
+      "            }",
+      "          }",
+      "        ]",
+      "      }",
+      "    ],",
+      "    stream: false,",
+      "    asr_options: {",
+      "      enable_itn: false",
+      "    }",
+      "  })",
+      "});",
+      "",
+      "const data = await response.json();",
+      "console.log(data);",
+    ].join("\n");
+  }
+
+  if (isBailianNativeTtsModel(item)) {
+    return [
+      `const url = '${baseUrl}/api/v1/services/aigc/multimodal-generation/generation';`,
+      "const payload = {",
+      `  model: '${item.model_id}',`,
+      "  input: {",
+      "    text: '那我来给大家推荐一款T恤，这款呢真的是超级好看。',",
+      "    voice: 'myvoice', // 替换为声音设计生成的专属音色",
+      "    language_type: 'Chinese'",
+      "  }",
+      "};",
+      "",
+      "// 非流式",
+      "const response = await fetch(url, {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY',",
+      "    'Content-Type': 'application/json'",
+      "  },",
+      "  body: JSON.stringify(payload)",
+      "});",
+      "const data = await response.json();",
+      "console.log(data);",
+      "",
+      "// 流式 SSE",
+      "const streamResponse = await fetch(url, {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Authorization': 'Bearer YOUR_API_KEY',",
+      "    'Content-Type': 'application/json',",
+      "    'X-DashScope-SSE': 'enable'",
+      "  },",
+      "  body: JSON.stringify(payload)",
+      "});",
+      "const reader = streamResponse.body?.getReader();",
+      "const decoder = new TextDecoder();",
+      "while (reader) {",
+      "  const { value, done } = await reader.read();",
+      "  if (done) break;",
+      "  console.log(decoder.decode(value, { stream: true }));",
+      "}",
+    ].join("\n");
+  }
+
+  return [
+    `const response = await fetch('${baseUrl}/v1/chat/completions', {`,
+    "  method: 'POST',",
+    "  headers: {",
+    "    'Authorization': 'Bearer YOUR_API_KEY',",
+    "    'Content-Type': 'application/json'",
+    "  },",
+    "  body: JSON.stringify({",
+    `    model: '${item.model_id}',`,
+    "    messages: [{ role: 'user', content: '你好' }]",
+    "  })",
+    "});",
+    "",
+    "const data = await response.json();",
+    "console.log(data);",
+  ].join("\n");
+}
+
+function buildDefaultCurlSnippet(item: ModelInfo, baseUrl: string) {
+  if (isBailianNativeImageModel(item)) {
+    return [
+      `curl -X POST ${baseUrl}/api/v1/services/aigc/multimodal-generation/generation \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      "  -d '{",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '      "messages": [',
+      "        {",
+      '          "role": "user",',
+      '          "content": [',
+      "            {",
+      '              "text": "一只戴围巾的橘猫，写实风格，干净背景。"',
+      "            }",
+      "          ]",
+      "        }",
+      "      ]",
+      "    },",
+      '    "parameters": {',
+      '      "watermark": false,',
+      '      "size": "1024*1024"',
+      "    }",
+      "  }'",
+    ].join("\n");
+  }
+
+  if (isChatCompatibleAsrModel(item)) {
+    return [
+      `curl -X POST ${baseUrl}/v1/chat/completions \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      "  -d '{",
+      `    "model": "${item.model_id}",`,
+      '    "messages": [',
+      "      {",
+      '        "role": "user",',
+      '        "content": [',
+      "          {",
+      '            "type": "input_audio",',
+      '            "input_audio": {',
+      '              "data": "https://dashscope.oss-cn-beijing.aliyuncs.com/audios/welcome.mp3"',
+      "            }",
+      "          }",
+      "        ]",
+      "      }",
+      "    ],",
+      '    "stream": false,',
+      '    "asr_options": {',
+      '      "enable_itn": false',
+      "    }",
+      "  }'",
+    ].join("\n");
+  }
+
+  if (isBailianNativeTtsModel(item)) {
+    return [
+      `curl -X POST ${baseUrl}/api/v1/services/aigc/multimodal-generation/generation \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      "  -d '{",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '      "text": "那我来给大家推荐一款T恤，这款呢真的是超级好看。",',
+      '      "voice": "myvoice",',
+      '      "language_type": "Chinese"',
+      "    }",
+      "  }'",
+      "",
+      "# 流式 SSE",
+      `curl -X POST ${baseUrl}/api/v1/services/aigc/multimodal-generation/generation \\`,
+      '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+      '  -H "Content-Type: application/json" \\',
+      '  -H "X-DashScope-SSE: enable" \\',
+      "  -d '{",
+      `    "model": "${item.model_id}",`,
+      '    "input": {',
+      '      "text": "那我来给大家推荐一款T恤，这款呢真的是超级好看。",',
+      '      "voice": "myvoice",',
+      '      "language_type": "Chinese"',
+      "    }",
+      "  }'",
+    ].join("\n");
+  }
+
+  return [
+    `curl -X POST ${baseUrl}/v1/chat/completions \\`,
+    '  -H "Authorization: Bearer YOUR_API_KEY" \\',
+    '  -H "Content-Type: application/json" \\',
+    "  -d '{",
+    `    "model": "${item.model_id}",`,
+    '    "messages": [{"role": "user", "content": "你好"}]',
+    "  }'",
+  ].join("\n");
+}
+
 function SideCard({
   title,
   children,
@@ -147,43 +507,9 @@ export default function ModelDetailPage() {
       typeof window !== "undefined"
         ? `${window.location.origin}/api`
         : (process.env.NEXT_PUBLIC_API_URL ?? "/api");
-    const python = item.example_python || `import requests
-
-url = "${baseUrl}/v1/chat/completions"
-headers = {
-    "Authorization": "Bearer YOUR_API_KEY",
-    "Content-Type": "application/json"
-}
-data = {
-    "model": "${item.model_id}",
-    "messages": [{"role": "user", "content": "你好"}]
-}
-
-response = requests.post(url, headers=headers, json=data)
-print(response.json())`;
-
-    const typescript = item.example_typescript || `const response = await fetch('${baseUrl}/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Authorization': 'Bearer YOUR_API_KEY',
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    model: '${item.model_id}',
-    messages: [{ role: 'user', content: '你好' }]
-  })
-});
-
-const data = await response.json();
-console.log(data);`;
-
-    const curl = item.example_curl || `curl -X POST ${baseUrl}/v1/chat/completions \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "model": "${item.model_id}",
-    "messages": [{"role": "user", "content": "你好"}]
-  }'`;
+    const python = item.example_python || buildDefaultPythonSnippet(item, baseUrl);
+    const typescript = item.example_typescript || buildDefaultTypescriptSnippet(item, baseUrl);
+    const curl = item.example_curl || buildDefaultCurlSnippet(item, baseUrl);
 
     return [
       { language: "Python", code: python },
@@ -307,7 +633,7 @@ console.log(data);`;
                   <div className="text-[#667085]">多模态 Chat</div>
                   <div className="mt-2">
                     <span className="rounded-full bg-[#e8f7ee] px-3 py-1 text-[13px] font-semibold text-[#0f9f57]">
-                      已验证支持图片输入
+                      已验证支持多模态输入
                     </span>
                   </div>
                 </div>
@@ -328,7 +654,13 @@ console.log(data);`;
 
           <SideCard tint="blue" title="API 接入指南">
             <p className="text-[16px] leading-8 text-[#4d596a]">
-              查看详细的API文档，了解如何快速集成此模型到您的应用中。
+              {isBailianNativeImageModel(item)
+                ? "该模型使用阿里百炼原生图像生成接口，不走 /v1/chat/completions。请按下方原生接口示例接入。"
+                : isBailianNativeTtsModel(item)
+                  ? "该模型使用阿里百炼原生多模态生成接口，支持普通 JSON 返回与 X-DashScope-SSE 流式返回；voice 请替换为声音设计生成的专属音色。"
+                : isChatCompatibleAsrModel(item)
+                  ? "该模型使用 /v1/chat/completions 兼容接口，并通过 input_audio 传入音频内容。"
+                : "查看详细的API文档，了解如何快速集成此模型到您的应用中。"}
             </p>
             <button
               className="mt-8 flex h-[52px] w-full items-center justify-center rounded-[16px] bg-[#315efb] text-[18px] font-semibold text-white"

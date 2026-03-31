@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.models import ModelCatalog
 
 router = APIRouter()
-MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5"}
+MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5", "qwen3-asr-flash"}
 
 
 def split_csv(value: str) -> list[str]:

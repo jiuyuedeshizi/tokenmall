@@ -18,7 +18,7 @@ from app.services.payments import create_payment_provider
 from app.services.wallet import apply_balance_change, mark_order_paid
 
 router = APIRouter()
-MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5"}
+MULTIMODAL_CHAT_MODELS = {"qwen-plus", "qwen-flash", "kimi-k2.5", "qwen3-asr-flash"}
 
 
 def parse_pricing_items(value: str | None) -> list[dict]:

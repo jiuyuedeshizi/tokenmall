@@ -267,6 +267,81 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         capture_usage_reservation.assert_called_once()
         self.assertEqual(capture_usage_reservation.call_args.kwargs["billing_source"], "estimated_stream")
 
+    async def test_before_request_estimates_per_image_reservation(self):
+        api_key = SimpleNamespace(
+            id=1,
+            status="active",
+            token_limit=None,
+            request_limit=None,
+            budget_limit=None,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.0000"),
+        )
+        user = SimpleNamespace(id=1, status="active")
+        model = SimpleNamespace(
+            model_code="qwen-image-2.0-pro",
+            billing_mode="per_image",
+            pricing_items='[{"label":"图片生成/编辑","unit":"元/张","price":"0.5"}]',
+            input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            display_name="Qwen Image",
+        )
+
+        with (
+            patch("app.services.proxy.get_wallet_account", return_value=SimpleNamespace(balance=Decimal("10"), reserved_balance=Decimal("0"))),
+            patch("app.services.proxy.create_usage_reservation") as create_reservation,
+        ):
+            request_id = before_request(
+                api_key=api_key,
+                user=user,
+                payload={"parameters": {"n": 2}},
+                model=model,
+                db=object(),
+            )
+
+        self.assertTrue(request_id.startswith("req_"))
+        self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 2)
+        self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("1.1000"))
+
+    async def test_before_request_estimates_per_10k_chars_reservation(self):
+        api_key = SimpleNamespace(
+            id=1,
+            status="active",
+            token_limit=None,
+            request_limit=None,
+            budget_limit=None,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.0000"),
+        )
+        user = SimpleNamespace(id=1, status="active")
+        model = SimpleNamespace(
+            model_code="qwen3-tts-vd-2026-01-26",
+            billing_mode="per_10k_chars",
+            pricing_items='[{"label":"语音合成","unit":"元/每万字符","price":"0.8"}]',
+            input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            display_name="Qwen TTS",
+        )
+
+        with (
+            patch("app.services.proxy.get_wallet_account", return_value=SimpleNamespace(balance=Decimal("10"), reserved_balance=Decimal("0"))),
+            patch("app.services.proxy.create_usage_reservation") as create_reservation,
+        ):
+            request_id = before_request(
+                api_key=api_key,
+                user=user,
+                payload={"input": {"text": "你好，欢迎来到 TokenMall。"}},
+                model=model,
+                db=object(),
+            )
+
+        self.assertTrue(request_id.startswith("req_"))
+        self.assertEqual(create_reservation.call_args.kwargs["estimated_input_tokens"], 18)
+        self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 0)
+        self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.0015"))
+
 
 class RoutingTests(unittest.TestCase):
     def test_resolve_chat_route_for_bailian(self):
@@ -280,6 +355,22 @@ class RoutingTests(unittest.TestCase):
             route = resolve_chat_route("qwen-plus", FakeDB(model))
 
         self.assertEqual(route.provider_url, "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        self.assertEqual(route.provider_api_key, "bk")
+
+    def test_resolve_bailian_native_route_accepts_audio(self):
+        model = SimpleNamespace(
+            provider="alibaba-bailian",
+            model_code="qwen3-tts-vd-2026-01-26",
+            model_id="qwen3-tts-vd-2026-01-26",
+            capability_type="audio",
+            is_active=True,
+        )
+        with patch("app.services.routing.get_bailian_provider_config", return_value=SimpleNamespace(native_api_base="https://dashscope.aliyuncs.com/api/v1", api_key="bk", headers={})):
+            from app.services.routing import resolve_bailian_multimodal_generation_route
+
+            route = resolve_bailian_multimodal_generation_route("qwen3-tts-vd-2026-01-26", FakeDB(model))
+
+        self.assertEqual(route.provider_url, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation")
         self.assertEqual(route.provider_api_key, "bk")
 
     def test_resolve_chat_route_rejects_tencent_placeholder(self):

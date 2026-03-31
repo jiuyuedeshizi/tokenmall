@@ -37,6 +37,51 @@ HOP_BY_HOP_HEADERS = {
 }
 
 
+def estimate_character_count(payload: dict) -> int:
+    input_value = payload.get("input")
+    if not isinstance(input_value, dict):
+        return 0
+    text = input_value.get("text")
+    if not isinstance(text, str):
+        return 0
+    return len(text)
+
+
+def estimate_video_seconds(payload: dict) -> int:
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, dict):
+        return 0
+    raw_duration = parameters.get("duration")
+    try:
+        return max(0, int(raw_duration or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def estimate_video_audio_enabled(payload: dict) -> bool | None:
+    parameters = payload.get("parameters")
+    if isinstance(parameters, dict) and parameters.get("audio") is False:
+        return False
+
+    input_value = payload.get("input")
+    if isinstance(input_value, dict) and input_value.get("audio_url"):
+        return True
+
+    if isinstance(parameters, dict) and "audio" in parameters:
+        return bool(parameters.get("audio"))
+    return None
+
+
+def estimate_video_resolution(payload: dict) -> str | None:
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    resolution = parameters.get("resolution")
+    if not isinstance(resolution, str):
+        return None
+    return resolution.strip().upper() or None
+
+
 def build_openai_error_response(
     *,
     message: str,
@@ -103,6 +148,36 @@ def estimate_prompt_tokens(payload: dict) -> int:
 
 
 def estimate_reserved_amount(model, payload: dict) -> tuple[int, int, Decimal]:
+    billing_mode = (model.billing_mode or "token").strip().lower()
+    if billing_mode == "per_image":
+        parameters = payload.get("parameters")
+        image_count = 1
+        if isinstance(parameters, dict):
+            raw_n = parameters.get("n") or 1
+            try:
+                image_count = max(1, int(raw_n))
+            except (TypeError, ValueError):
+                image_count = 1
+        estimated_amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        return 0, image_count, reserved_amount
+    if billing_mode == "per_10k_chars":
+        estimated_chars = estimate_character_count(payload)
+        estimated_amount = calculate_usage_cost(model, 0, 0, char_count=estimated_chars)
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        return estimated_chars, 0, reserved_amount
+    if billing_mode == "per_second":
+        estimated_seconds = estimate_video_seconds(payload)
+        estimated_amount = calculate_usage_cost(
+            model,
+            0,
+            0,
+            second_count=estimated_seconds,
+            resolution=estimate_video_resolution(payload),
+            audio=estimate_video_audio_enabled(payload),
+        )
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        return estimated_seconds, 0, reserved_amount
     estimated_input_tokens = estimate_prompt_tokens(payload)
     estimated_output_tokens = int(payload.get("max_tokens") or DEFAULT_MAX_OUTPUT_TOKENS)
     estimated_amount = calculate_usage_cost(model, estimated_input_tokens, estimated_output_tokens)
@@ -173,10 +248,37 @@ def _finalize_success(
     billing_source: str,
     db: Session,
 ) -> None:
-    prompt_tokens = int(usage.get("prompt_tokens", 0))
-    completion_tokens = int(usage.get("completion_tokens", 0))
-    total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
-    amount = calculate_usage_cost(model, prompt_tokens, completion_tokens)
+    billing_mode = (model.billing_mode or "token").strip().lower()
+    if billing_mode == "per_image":
+        image_count = int(usage.get("image_count", 1) or 1)
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
+    elif billing_mode == "per_10k_chars":
+        char_count = int(usage.get("char_count", 0) or 0)
+        prompt_tokens = char_count
+        completion_tokens = 0
+        total_tokens = char_count
+        amount = calculate_usage_cost(model, 0, 0, char_count=char_count)
+    elif billing_mode == "per_second":
+        second_count = int(usage.get("second_count", 0) or 0)
+        prompt_tokens = second_count
+        completion_tokens = 0
+        total_tokens = second_count
+        amount = calculate_usage_cost(
+            model,
+            0,
+            0,
+            second_count=second_count,
+            resolution=str(usage.get("resolution") or "") or None,
+            audio=usage.get("audio") if isinstance(usage.get("audio"), bool) else None,
+        )
+    else:
+        prompt_tokens = int(usage.get("prompt_tokens", 0))
+        completion_tokens = int(usage.get("completion_tokens", 0))
+        total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+        amount = calculate_usage_cost(model, prompt_tokens, completion_tokens)
     api_key.used_tokens += total_tokens
     api_key.used_requests += 1
     api_key.used_amount = Decimal(api_key.used_amount) + amount
@@ -295,6 +397,31 @@ def after_estimated_stream_response(
     )
 
 
+def after_estimated_character_response(
+    *,
+    api_key: ApiKey,
+    user: User,
+    model,
+    request_id: str,
+    payload: dict,
+    upstream_id: str,
+    response_time_ms: int,
+    db: Session,
+) -> None:
+    usage = {"char_count": estimate_character_count(payload)}
+    _finalize_success(
+        api_key=api_key,
+        user=user,
+        model=model,
+        request_id=request_id,
+        upstream_id=upstream_id,
+        usage=usage,
+        response_time_ms=response_time_ms,
+        billing_source="estimated_chars",
+        db=db,
+    )
+
+
 def on_error(
     *,
     api_key: ApiKey,
@@ -340,7 +467,7 @@ def _build_downstream_headers(headers: httpx.Headers) -> dict[str, str]:
 def _upstream_error_response(response: httpx.Response) -> JSONResponse:
     try:
         payload = response.json()
-        if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+        if isinstance(payload, dict):
             return JSONResponse(status_code=response.status_code, content=payload)
     except ValueError:
         payload = None
@@ -370,12 +497,14 @@ async def forward_request(
     provider_url: str,
     api_key: str,
     provider_headers: dict[str, str] | None = None,
+    method: str = "POST",
 ) -> Response | JSONResponse:
-    body = await request.body()
+    body = await request.body() if method.upper() != "GET" else None
     headers = _build_upstream_headers(request, api_key, provider_headers)
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            upstream_response = await client.post(
+            upstream_response = await client.request(
+                method.upper(),
                 provider_url,
                 content=body,
                 headers=headers,

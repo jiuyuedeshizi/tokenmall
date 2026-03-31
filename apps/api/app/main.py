@@ -9,6 +9,7 @@ from fastapi.exception_handlers import http_exception_handler
 from app.api.admin import router as admin_router
 from app.api.api_keys import router as api_keys_router
 from app.api.auth import router as auth_router
+from app.api.bailian_native import router as bailian_native_router
 from app.api.dashboard import router as dashboard_router
 from app.api.models import router as models_router
 from app.api.payments import router as payments_router
@@ -47,6 +48,7 @@ app.include_router(api_keys_router, prefix="/api-keys", tags=["api-keys"])
 app.include_router(usage_router, prefix="/usage", tags=["usage"])
 app.include_router(admin_router, prefix="/admin", tags=["admin"])
 app.include_router(proxy_router, prefix="/v1", tags=["proxy"])
+app.include_router(bailian_native_router, tags=["bailian-native"])
 
 
 @app.get("/health")
