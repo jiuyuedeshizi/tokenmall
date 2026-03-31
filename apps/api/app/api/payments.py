@@ -4,10 +4,11 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.db.session import get_db
+from app.db.session import get_async_db, get_db
 from app.models import PaymentOrder, RefundItem, RefundRequest, WalletAccount, WalletLedger
 from app.schemas.payment import (
     CreatePaymentOrderRequest,
@@ -17,7 +18,7 @@ from app.schemas.payment import (
     RefundSummaryResponse,
 )
 from app.services.payments import create_payment_provider
-from app.services.wallet import create_payment_order, mark_order_paid, update_payment_order_channel
+from app.services.wallet import create_payment_order, mark_order_paid, mark_order_paid_async, update_payment_order_channel
 
 router = APIRouter()
 
@@ -297,29 +298,31 @@ def create_refund(
 
 
 @router.post("/alipay/notify")
-async def alipay_notify(request: Request, db: Session = Depends(get_db)):
+async def alipay_notify(request: Request, db: AsyncSession = Depends(get_async_db)):
     provider = create_payment_provider("alipay")
     result = provider.parse_notify(headers=dict(request.headers), body=await request.form())
     if result.get("success") and result.get("order_no"):
-        order = db.query(PaymentOrder).filter(PaymentOrder.order_no == result["order_no"]).first()
-        if order and result.get("channel_order_no") and order.channel_order_no != result["channel_order_no"]:
-            order.channel_order_no = result["channel_order_no"]
-            db.commit()
-        mark_order_paid(result["order_no"], db, description="支付宝充值到账")
+        await mark_order_paid_async(
+            result["order_no"],
+            db,
+            description="支付宝充值到账",
+            channel_order_no=result.get("channel_order_no"),
+        )
     return "success"
 
 
 @router.post("/wechat/notify")
-async def wechat_notify(request: Request, db: Session = Depends(get_db)):
+async def wechat_notify(request: Request, db: AsyncSession = Depends(get_async_db)):
     body = await request.body()
     provider = create_payment_provider("wechat")
     result = provider.parse_notify(headers=dict(request.headers), body=body)
     if result.get("success") and result.get("order_no"):
-        order = db.query(PaymentOrder).filter(PaymentOrder.order_no == result["order_no"]).first()
-        if order and result.get("channel_order_no") and order.channel_order_no != result["channel_order_no"]:
-            order.channel_order_no = result["channel_order_no"]
-            db.commit()
-        mark_order_paid(result["order_no"], db, description="微信支付充值到账")
+        await mark_order_paid_async(
+            result["order_no"],
+            db,
+            description="微信支付充值到账",
+            channel_order_no=result.get("channel_order_no"),
+        )
     return {"code": "SUCCESS", "message": "成功"}
 
 
@@ -337,13 +340,14 @@ def unionpay_pay_page(order_no: str, db: Session = Depends(get_db)):
 
 
 @router.post("/unionpay/notify")
-async def unionpay_notify(request: Request, db: Session = Depends(get_db)):
+async def unionpay_notify(request: Request, db: AsyncSession = Depends(get_async_db)):
     provider = create_payment_provider("unionpay")
     result = provider.parse_notify(headers=dict(request.headers), body=await request.form())
     if result.get("success") and result.get("order_no"):
-        order = db.query(PaymentOrder).filter(PaymentOrder.order_no == result["order_no"]).first()
-        if order and result.get("channel_order_no") and order.channel_order_no != result["channel_order_no"]:
-            order.channel_order_no = result["channel_order_no"]
-            db.commit()
-        mark_order_paid(result["order_no"], db, description="银联支付充值到账")
+        await mark_order_paid_async(
+            result["order_no"],
+            db,
+            description="银联支付充值到账",
+            channel_order_no=result.get("channel_order_no"),
+        )
     return "ok"

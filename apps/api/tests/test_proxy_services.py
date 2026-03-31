@@ -77,7 +77,7 @@ class FakeAsyncClientNonStream:
         type(self).captured_headers = headers
         return type(self).response
 
-    async def request(self, method, url, content=None, headers=None):
+    async def request(self, method, url, content=None, headers=None, timeout=None):  # noqa: ARG002
         type(self).captured_url = url
         type(self).captured_content = content
         type(self).captured_headers = headers
@@ -106,10 +106,6 @@ class FakeStreamingResponse:
 class FakeAsyncClientStream:
     response = None
     captured_request = None
-    closed = False
-
-    def __init__(self, timeout=None):  # noqa: ARG002
-        pass
 
     def build_request(self, method, url, content=None, headers=None):
         request = httpx.Request(method, url, content=content, headers=headers)
@@ -119,9 +115,6 @@ class FakeAsyncClientStream:
     async def send(self, request, stream=False):  # noqa: ARG002
         type(self).captured_request = request
         return type(self).response
-
-    async def aclose(self):
-        type(self).closed = True
 
 
 class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
@@ -135,7 +128,7 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("POST", "https://unit.test/chat/completions"),
         )
 
-        with patch("app.services.proxy.httpx.AsyncClient", FakeAsyncClientNonStream):
+        with patch("app.services.proxy.get_proxy_http_client", return_value=FakeAsyncClientNonStream()):
             response = await forward_request(
                 request=request,
                 provider_url="https://unit.test/chat/completions",
@@ -160,7 +153,7 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("GET", "https://unit.test/tasks/task_1"),
         )
 
-        with patch("app.services.proxy.httpx.AsyncClient", FakeAsyncClientNonStream):
+        with patch("app.services.proxy.get_proxy_http_client", return_value=FakeAsyncClientNonStream()):
             response = await forward_request(
                 request=request,
                 provider_url="https://unit.test/tasks/task_1",
@@ -179,10 +172,9 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
             b"data: [DONE]\n\n",
         ]
         FakeAsyncClientStream.response = FakeStreamingResponse(chunks=chunks)
-        FakeAsyncClientStream.closed = False
         request = build_request(b'{"model":"qwen-plus","stream":true}', headers={"authorization": "Bearer client"})
 
-        with patch("app.services.proxy.httpx.AsyncClient", FakeAsyncClientStream):
+        with patch("app.services.proxy.get_proxy_http_client", return_value=FakeAsyncClientStream()):
             response, state = await forward_stream(
                 request=request,
                 provider_url="https://unit.test/chat/completions",
@@ -198,7 +190,6 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["usage"]["total_tokens"], 18)
         self.assertEqual(FakeAsyncClientStream.captured_request.headers["authorization"], "Bearer provider-secret")
         self.assertTrue(FakeAsyncClientStream.response.closed)
-        self.assertTrue(FakeAsyncClientStream.closed)
 
     async def test_forward_stream_surfaces_upstream_error_payload(self):
         FakeAsyncClientStream.response = FakeStreamingResponse(
@@ -208,7 +199,7 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         )
         request = build_request(b'{"model":"qwen-plus","stream":true}')
 
-        with patch("app.services.proxy.httpx.AsyncClient", FakeAsyncClientStream):
+        with patch("app.services.proxy.get_proxy_http_client", return_value=FakeAsyncClientStream()):
             response, state = await forward_stream(
                 request=request,
                 provider_url="https://unit.test/chat/completions",

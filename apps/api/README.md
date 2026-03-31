@@ -13,17 +13,32 @@ FastAPI 业务后端，负责：
 ## 启动
 
 ```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/alembic upgrade head
+.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## 测试
+
+```bash
+.venv/bin/python -m pytest tests -q
+```
+
+## 迁移
+
+```bash
+.venv/bin/alembic upgrade head
+.venv/bin/alembic downgrade -1
 ```
 
 ## 环境变量
 
 - `DATABASE_URL`
 - `JWT_SECRET`
-- `LITELLM_URL`
-- `LITELLM_MASTER_KEY`
+- `BAILIAN_API_KEY`
+- `BAILIAN_API_BASE`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 
-服务启动时会自动建表并写入默认管理员和模型种子数据。
+服务启动时只负责空环境建表前置、默认管理员和模型种子数据；业务表结构变更统一通过 Alembic 管理。

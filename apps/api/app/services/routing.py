@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models import ModelCatalog
@@ -75,6 +77,38 @@ def resolve_chat_route(model_code: str, db: Session) -> RouteTarget:
     )
 
 
+async def resolve_chat_route_async(model_code: str, db: AsyncSession) -> RouteTarget:
+    normalized_code = (model_code or "").strip()
+    if not normalized_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 model")
+
+    model = (
+        await db.execute(
+            select(ModelCatalog).where(ModelCatalog.model_code == normalized_code, ModelCatalog.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
+
+    upstream_model_id = (model.model_id or "").strip()
+    if not upstream_model_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模型未配置上游 model_id")
+    base_url, api_key, headers = _resolve_provider(model)
+    if not base_url:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider base_url 未配置")
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider api_key 未配置")
+
+    return RouteTarget(
+        provider_name=model.provider,
+        provider_url=_build_provider_url(base_url, "/chat/completions"),
+        provider_api_key=api_key,
+        provider_headers=headers,
+        upstream_model_id=upstream_model_id,
+        model=model,
+    )
+
+
 def resolve_bailian_multimodal_generation_route(model_code: str, db: Session) -> RouteTarget:
     normalized_code = (model_code or "").strip()
     if not normalized_code:
@@ -107,6 +141,38 @@ def resolve_bailian_multimodal_generation_route(model_code: str, db: Session) ->
     )
 
 
+async def resolve_bailian_multimodal_generation_route_async(model_code: str, db: AsyncSession) -> RouteTarget:
+    normalized_code = (model_code or "").strip()
+    if not normalized_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 model")
+
+    model = (
+        await db.execute(
+            select(ModelCatalog).where(ModelCatalog.model_code == normalized_code, ModelCatalog.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
+    if (model.provider or "").strip().lower() not in {"alibaba-bailian", "dashscope"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持阿里百炼模型")
+    if (model.capability_type or "").strip().lower() not in {"image", "audio"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持百炼原生图像或语音模型")
+
+    upstream_model_id = (model.model_id or "").strip()
+    config = get_bailian_provider_config()
+    if not config.api_key:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider api_key 未配置")
+
+    return RouteTarget(
+        provider_name=model.provider,
+        provider_url=_build_provider_url(config.native_api_base, "/services/aigc/multimodal-generation/generation"),
+        provider_api_key=config.api_key,
+        provider_headers=dict(config.headers),
+        upstream_model_id=upstream_model_id,
+        model=model,
+    )
+
+
 def resolve_bailian_video_synthesis_route(model_code: str, db: Session) -> RouteTarget:
     normalized_code = (model_code or "").strip()
     if not normalized_code:
@@ -117,6 +183,38 @@ def resolve_bailian_video_synthesis_route(model_code: str, db: Session) -> Route
         .filter(ModelCatalog.model_code == normalized_code, ModelCatalog.is_active.is_(True))
         .first()
     )
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
+    if (model.provider or "").strip().lower() not in {"alibaba-bailian", "dashscope"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持阿里百炼模型")
+    if (model.capability_type or "").strip().lower() != "video":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前路由仅支持视频生成模型")
+
+    upstream_model_id = (model.model_id or "").strip()
+    config = get_bailian_provider_config()
+    if not config.api_key:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="上游 provider api_key 未配置")
+
+    return RouteTarget(
+        provider_name=model.provider,
+        provider_url=_build_provider_url(config.native_api_base, "/services/aigc/video-generation/video-synthesis"),
+        provider_api_key=config.api_key,
+        provider_headers=dict(config.headers),
+        upstream_model_id=upstream_model_id,
+        model=model,
+    )
+
+
+async def resolve_bailian_video_synthesis_route_async(model_code: str, db: AsyncSession) -> RouteTarget:
+    normalized_code = (model_code or "").strip()
+    if not normalized_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 model")
+
+    model = (
+        await db.execute(
+            select(ModelCatalog).where(ModelCatalog.model_code == normalized_code, ModelCatalog.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型不存在")
     if (model.provider or "").strip().lower() not in {"alibaba-bailian", "dashscope"}:

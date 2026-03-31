@@ -1,9 +1,10 @@
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.exception_handlers import http_exception_handler
 
 from app.api.admin import router as admin_router
@@ -18,7 +19,10 @@ from app.api.usage import router as usage_router
 from app.api.wallet import router as wallet_router
 from app.core.config import settings
 from app.db.init_db import initialize_database
+from app.services.http_client import close_proxy_http_client, get_proxy_http_client
+from app.services.observability import export_metrics_text
 from app.services.proxy import build_openai_error_response, openai_error_from_http_exception
+from app.services.reservation_cleanup import reservation_cleanup_loop
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize_database()
-    yield
+    get_proxy_http_client()
+    stop_event = asyncio.Event()
+    cleanup_task = asyncio.create_task(reservation_cleanup_loop(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        await cleanup_task
+        await close_proxy_http_client()
 
 
 app = FastAPI(title="TokenMall API", version="0.1.0", lifespan=lifespan)
@@ -54,6 +66,11 @@ app.include_router(bailian_native_router, tags=["bailian-native"])
 @app.get("/health")
 def healthcheck():
     return {"status": "ok"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics():
+    return PlainTextResponse(export_metrics_text(), media_type="text/plain; version=0.0.4")
 
 
 @app.exception_handler(HTTPException)

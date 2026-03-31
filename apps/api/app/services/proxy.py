@@ -1,23 +1,32 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+from types import SimpleNamespace
 from time import perf_counter
 from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models import ApiKey, UsageLog, User
+from app.models import ApiKey, UsageLog, UsageReservation, User
+from app.services.http_client import get_proxy_http_client
+from app.services.observability import increment_metric, log_event, metrics_timer
 from app.services.pricing import calculate_usage_cost
 from app.services.tokenizer import count_text_tokens, estimate_chat_messages_tokens
 from app.services.wallet import (
     capture_usage_reservation,
+    capture_usage_reservation_async,
     create_usage_reservation,
+    create_usage_reservation_async,
     get_available_balance,
     get_wallet_account,
+    get_wallet_account_async,
     release_usage_reservation,
+    release_usage_reservation_async,
 )
 
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
@@ -199,6 +208,8 @@ def assert_key_can_call(api_key: ApiKey, user: User, db: Session) -> None:
     if get_available_balance(wallet) <= Decimal("0"):
         api_key.status = "arrears"
         db.commit()
+        increment_metric("proxy.arrears_total")
+        log_event("proxy.arrears", api_key_id=api_key.id, user_id=user.id, status=api_key.status)
         raise_openai_error(status.HTTP_402_PAYMENT_REQUIRED, "余额不足", "insufficient_balance")
 
 
@@ -208,6 +219,24 @@ def assert_usage_limits(api_key: ApiKey, next_tokens: int, next_amount: Decimal)
     if api_key.request_limit and api_key.used_requests + 1 > api_key.request_limit:
         raise_openai_error(status.HTTP_403_FORBIDDEN, "超出请求限额", "permission_denied")
     if api_key.budget_limit and Decimal(api_key.used_amount) + next_amount > Decimal(api_key.budget_limit):
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "超出预算限额", "permission_denied")
+
+
+def _apply_api_key_usage_limits(api_key: ApiKey, next_tokens: int, next_amount: Decimal) -> None:
+    if api_key.token_limit and api_key.used_tokens + next_tokens > api_key.token_limit:
+        api_key.status = "quota_exceeded"
+        increment_metric("proxy.quota_exceeded_total")
+        log_event("proxy.quota_exceeded", api_key_id=api_key.id, reason="token_limit", status=api_key.status)
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "超出 Token 限额", "permission_denied")
+    if api_key.request_limit and api_key.used_requests + 1 > api_key.request_limit:
+        api_key.status = "quota_exceeded"
+        increment_metric("proxy.quota_exceeded_total")
+        log_event("proxy.quota_exceeded", api_key_id=api_key.id, reason="request_limit", status=api_key.status)
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "超出请求限额", "permission_denied")
+    if api_key.budget_limit and Decimal(api_key.used_amount) + next_amount > Decimal(api_key.budget_limit):
+        api_key.status = "quota_exceeded"
+        increment_metric("proxy.quota_exceeded_total")
+        log_event("proxy.quota_exceeded", api_key_id=api_key.id, reason="budget_limit", status=api_key.status)
         raise_openai_error(status.HTTP_403_FORBIDDEN, "超出预算限额", "permission_denied")
 
 
@@ -234,6 +263,31 @@ def _record_proxy_error(
         )
     )
     db.commit()
+
+
+async def _record_proxy_error_async(
+    *,
+    user: User,
+    api_key: ApiKey,
+    request_id: str,
+    model_code: str,
+    error_message: str,
+    response_time_ms: int | None,
+    db: AsyncSession,
+) -> None:
+    db.add(
+        UsageLog(
+            user_id=user.id,
+            api_key_id=api_key.id,
+            model_code=model_code,
+            request_id=request_id,
+            response_time_ms=response_time_ms,
+            status="error",
+            billing_source="error",
+            error_message=error_message[:255],
+        )
+    )
+    await db.commit()
 
 
 def _finalize_success(
@@ -319,6 +373,95 @@ def _finalize_success(
     db.commit()
 
 
+async def _finalize_success_async(
+    *,
+    api_key: ApiKey,
+    user: User,
+    model,
+    request_id: str,
+    upstream_id: str,
+    usage: dict,
+    response_time_ms: int,
+    billing_source: str,
+    db: AsyncSession,
+) -> None:
+    locked_api_key = (
+        await db.execute(select(ApiKey).where(ApiKey.id == api_key.id).with_for_update())
+    ).scalar_one()
+    billing_mode = (model.billing_mode or "token").strip().lower()
+    if billing_mode == "per_image":
+        image_count = int(usage.get("image_count", 1) or 1)
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
+    elif billing_mode == "per_10k_chars":
+        char_count = int(usage.get("char_count", 0) or 0)
+        prompt_tokens = char_count
+        completion_tokens = 0
+        total_tokens = char_count
+        amount = calculate_usage_cost(model, 0, 0, char_count=char_count)
+    elif billing_mode == "per_second":
+        second_count = int(usage.get("second_count", 0) or 0)
+        prompt_tokens = second_count
+        completion_tokens = 0
+        total_tokens = second_count
+        amount = calculate_usage_cost(
+            model,
+            0,
+            0,
+            second_count=second_count,
+            resolution=str(usage.get("resolution") or "") or None,
+            audio=usage.get("audio") if isinstance(usage.get("audio"), bool) else None,
+        )
+    else:
+        prompt_tokens = int(usage.get("prompt_tokens", 0))
+        completion_tokens = int(usage.get("completion_tokens", 0))
+        total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+        amount = calculate_usage_cost(model, prompt_tokens, completion_tokens)
+
+    _apply_api_key_usage_limits(locked_api_key, total_tokens, amount)
+    locked_api_key.used_tokens += total_tokens
+    locked_api_key.used_requests += 1
+    locked_api_key.used_amount = Decimal(locked_api_key.used_amount) + amount
+    locked_api_key.last_used_at = datetime.now(timezone.utc)
+
+    if locked_api_key.budget_limit and Decimal(locked_api_key.used_amount) >= Decimal(locked_api_key.budget_limit):
+        locked_api_key.status = "quota_exceeded"
+    elif locked_api_key.token_limit and locked_api_key.used_tokens >= locked_api_key.token_limit:
+        locked_api_key.status = "quota_exceeded"
+    elif locked_api_key.request_limit and locked_api_key.used_requests >= locked_api_key.request_limit:
+        locked_api_key.status = "quota_exceeded"
+
+    await capture_usage_reservation_async(
+        request_id=request_id,
+        actual_amount=amount,
+        description=f"{model.display_name} 调用扣费",
+        reference_id=upstream_id,
+        billing_source=billing_source,
+        db=db,
+        commit=False,
+    )
+
+    db.add(
+        UsageLog(
+            user_id=user.id,
+            api_key_id=locked_api_key.id,
+            model_code=model.model_code,
+            request_id=upstream_id,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            amount=amount,
+            billing_source=billing_source,
+            response_time_ms=response_time_ms,
+            status="success",
+            error_message="",
+        )
+    )
+    await db.commit()
+
+
 def before_request(*, api_key: ApiKey, user: User, payload: dict, model, db: Session) -> str:
     assert_key_can_call(api_key, user, db)
     estimated_input_tokens, estimated_output_tokens, reserved_amount = estimate_reserved_amount(model, payload)
@@ -339,6 +482,81 @@ def before_request(*, api_key: ApiKey, user: User, payload: dict, model, db: Ses
     return request_id
 
 
+async def before_request_async(*, api_key: ApiKey, user: User, payload: dict, model, db: AsyncSession) -> str:
+    api_key_id = api_key.id
+    user_id = user.id
+    model_code = model.model_code
+    model_snapshot = SimpleNamespace(
+        billing_mode=model.billing_mode,
+        pricing_items=model.pricing_items,
+        input_price_per_million=model.input_price_per_million,
+        output_price_per_million=model.output_price_per_million,
+        model_code=model_code,
+    )
+    if db.bind and db.bind.dialect.name == "sqlite":
+        await db.rollback()
+        await db.execute(text("BEGIN IMMEDIATE"))
+    locked_user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
+    locked_api_key = (
+        await db.execute(select(ApiKey).where(ApiKey.id == api_key_id).with_for_update())
+    ).scalar_one()
+    wallet = await get_wallet_account_async(locked_user.id, db)
+    if locked_user.status != "active":
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "用户已被禁用", "permission_denied")
+    if locked_api_key.status == "arrears" and get_available_balance(wallet) > Decimal("0"):
+        locked_api_key.status = "active"
+    if locked_api_key.status != "active":
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "API Key 不可用", "permission_denied")
+    if get_available_balance(wallet) <= Decimal("0"):
+        locked_api_key.status = "arrears"
+        await db.commit()
+        increment_metric("proxy.arrears_total")
+        log_event("proxy.arrears", api_key_id=locked_api_key.id, user_id=locked_user.id, status=locked_api_key.status)
+        raise_openai_error(status.HTTP_402_PAYMENT_REQUIRED, "余额不足", "insufficient_balance")
+
+    estimated_input_tokens, estimated_output_tokens, reserved_amount = estimate_reserved_amount(model_snapshot, payload)
+    pending_request_count, pending_reserved_amount, pending_estimated_tokens = (
+        await db.execute(
+            select(
+                func.count(UsageReservation.id),
+                func.coalesce(func.sum(UsageReservation.reserved_amount), Decimal("0.0000")),
+                func.coalesce(
+                    func.sum(UsageReservation.estimated_input_tokens + UsageReservation.estimated_output_tokens),
+                    0,
+                ),
+            ).where(
+                UsageReservation.api_key_id == locked_api_key.id,
+                UsageReservation.status == "pending",
+            )
+        )
+    ).one()
+
+    projected_tokens = int(pending_estimated_tokens or 0) + estimated_input_tokens + estimated_output_tokens
+    projected_amount = Decimal(pending_reserved_amount or Decimal("0.0000")) + reserved_amount
+    if locked_api_key.request_limit and locked_api_key.used_requests + int(pending_request_count or 0) + 1 > locked_api_key.request_limit:
+        locked_api_key.status = "quota_exceeded"
+        await db.commit()
+        increment_metric("proxy.quota_exceeded_total")
+        log_event("proxy.quota_exceeded", api_key_id=locked_api_key.id, reason="request_limit", status=locked_api_key.status)
+        raise_openai_error(status.HTTP_403_FORBIDDEN, "超出请求限额", "permission_denied")
+    _apply_api_key_usage_limits(locked_api_key, projected_tokens, projected_amount)
+
+    request_id = f"req_{uuid4().hex}"
+    await create_usage_reservation_async(
+        user_id=locked_user.id,
+        api_key=locked_api_key,
+        model_code=model_code,
+        request_id=request_id,
+        reserved_amount=reserved_amount,
+        estimated_input_tokens=estimated_input_tokens,
+        estimated_output_tokens=estimated_output_tokens,
+        billing_source="reserved_estimate",
+        db=db,
+    )
+    await db.commit()
+    return request_id
+
+
 def after_response(
     *,
     api_key: ApiKey,
@@ -353,6 +571,32 @@ def after_response(
     if not isinstance(usage, dict):
         raise ValueError("响应未返回 usage 数据")
     _finalize_success(
+        api_key=api_key,
+        user=user,
+        model=model,
+        request_id=request_id,
+        upstream_id=str(response_payload.get("id", request_id)),
+        usage=usage,
+        response_time_ms=response_time_ms,
+        billing_source="provider_usage",
+        db=db,
+    )
+
+
+async def after_response_async(
+    *,
+    api_key: ApiKey,
+    user: User,
+    model,
+    request_id: str,
+    response_payload: dict,
+    response_time_ms: int,
+    db: AsyncSession,
+) -> None:
+    usage = response_payload.get("usage")
+    if not isinstance(usage, dict):
+        raise ValueError("响应未返回 usage 数据")
+    await _finalize_success_async(
         api_key=api_key,
         user=user,
         model=model,
@@ -397,6 +641,38 @@ def after_estimated_stream_response(
     )
 
 
+async def after_estimated_stream_response_async(
+    *,
+    api_key: ApiKey,
+    user: User,
+    model,
+    request_id: str,
+    payload: dict,
+    output_text: str,
+    upstream_id: str,
+    response_time_ms: int,
+    db: AsyncSession,
+) -> None:
+    prompt_tokens = estimate_prompt_tokens(payload)
+    completion_tokens = count_text_tokens(output_text)
+    usage = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+    await _finalize_success_async(
+        api_key=api_key,
+        user=user,
+        model=model,
+        request_id=request_id,
+        upstream_id=upstream_id,
+        usage=usage,
+        response_time_ms=response_time_ms,
+        billing_source="estimated_stream",
+        db=db,
+    )
+
+
 def after_estimated_character_response(
     *,
     api_key: ApiKey,
@@ -410,6 +686,31 @@ def after_estimated_character_response(
 ) -> None:
     usage = {"char_count": estimate_character_count(payload)}
     _finalize_success(
+        api_key=api_key,
+        user=user,
+        model=model,
+        request_id=request_id,
+        upstream_id=upstream_id,
+        usage=usage,
+        response_time_ms=response_time_ms,
+        billing_source="estimated_chars",
+        db=db,
+    )
+
+
+async def after_estimated_character_response_async(
+    *,
+    api_key: ApiKey,
+    user: User,
+    model,
+    request_id: str,
+    payload: dict,
+    upstream_id: str,
+    response_time_ms: int,
+    db: AsyncSession,
+) -> None:
+    usage = {"char_count": estimate_character_count(payload)}
+    await _finalize_success_async(
         api_key=api_key,
         user=user,
         model=model,
@@ -436,6 +737,47 @@ def on_error(
     _record_proxy_error(
         user=user,
         api_key=api_key,
+        request_id=request_id,
+        model_code=model_code,
+        error_message=error_message,
+        response_time_ms=response_time_ms,
+        db=db,
+    )
+
+
+async def on_error_async(
+    *,
+    api_key: ApiKey,
+    user: User,
+    request_id: str,
+    model_code: str,
+    error_message: str,
+    response_time_ms: int | None,
+    db: AsyncSession,
+) -> None:
+    locked_api_key = (
+        await db.execute(select(ApiKey).where(ApiKey.id == api_key.id).with_for_update())
+    ).scalar_one_or_none()
+    if locked_api_key:
+        if "超出" in error_message and "限额" in error_message:
+            locked_api_key.status = "quota_exceeded"
+            increment_metric("proxy.quota_exceeded_total")
+        elif "余额不足" in error_message:
+            locked_api_key.status = "arrears"
+            increment_metric("proxy.arrears_total")
+        log_event(
+            "proxy.error",
+            api_key_id=locked_api_key.id,
+            user_id=user.id,
+            request_id=request_id,
+            model_code=model_code,
+            status=locked_api_key.status,
+            reason=error_message,
+        )
+    await release_usage_reservation_async(request_id=request_id, error_message=error_message, db=db, commit=False)
+    await _record_proxy_error_async(
+        user=user,
+        api_key=locked_api_key or api_key,
         request_id=request_id,
         model_code=model_code,
         error_message=error_message,
@@ -502,23 +844,45 @@ async def forward_request(
 ) -> Response | JSONResponse:
     body = body_override if body_override is not None else (await request.body() if method.upper() != "GET" else None)
     headers = _build_upstream_headers(request, api_key, provider_headers)
+    client = get_proxy_http_client()
+    finish_timer = metrics_timer("proxy.upstream_request")
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            upstream_response = await client.request(
-                method.upper(),
-                provider_url,
-                content=body,
-                headers=headers,
-            )
+        upstream_response = await client.request(
+            method.upper(),
+            provider_url,
+            content=body,
+            headers=headers,
+            timeout=120.0,
+        )
     except httpx.HTTPError as exc:
+        duration_seconds = finish_timer()
+        increment_metric("proxy.upstream_failure_total")
+        log_event("proxy.upstream_error", provider_url=provider_url, method=method.upper(), duration_seconds=duration_seconds, reason=str(exc))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": {"message": str(exc), "type": "upstream_error"}},
         ) from exc
+    duration_seconds = finish_timer()
 
     if upstream_response.status_code >= 400:
+        increment_metric("proxy.upstream_failure_total")
+        log_event(
+            "proxy.upstream_response",
+            provider_url=provider_url,
+            method=method.upper(),
+            status=upstream_response.status_code,
+            duration_seconds=duration_seconds,
+        )
         return _upstream_error_response(upstream_response)
 
+    increment_metric("proxy.upstream_success_total")
+    log_event(
+        "proxy.upstream_response",
+        provider_url=provider_url,
+        method=method.upper(),
+        status=upstream_response.status_code,
+        duration_seconds=duration_seconds,
+    )
     downstream_headers = _build_downstream_headers(upstream_response.headers)
     return Response(
         content=upstream_response.content,
@@ -537,21 +901,32 @@ async def forward_stream(
 ) -> tuple[Response | JSONResponse, dict[str, object]]:
     body = body_override if body_override is not None else await request.body()
     headers = _build_upstream_headers(request, api_key, provider_headers)
-    client = httpx.AsyncClient(timeout=None)
+    client = get_proxy_http_client()
+    finish_timer = metrics_timer("proxy.upstream_stream_setup")
     try:
         upstream_request = client.build_request("POST", provider_url, content=body, headers=headers)
         upstream_response = await client.send(upstream_request, stream=True)
     except httpx.HTTPError as exc:
-        await client.aclose()
+        duration_seconds = finish_timer()
+        increment_metric("proxy.upstream_failure_total")
+        log_event("proxy.upstream_error", provider_url=provider_url, method="POST", duration_seconds=duration_seconds, reason=str(exc))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": {"message": str(exc), "type": "upstream_error"}},
         ) from exc
+    duration_seconds = finish_timer()
 
     if upstream_response.status_code >= 400:
         error_response = await upstream_response.aread()
         await upstream_response.aclose()
-        await client.aclose()
+        increment_metric("proxy.upstream_failure_total")
+        log_event(
+            "proxy.upstream_response",
+            provider_url=provider_url,
+            method="POST",
+            status=upstream_response.status_code,
+            duration_seconds=duration_seconds,
+        )
         fallback = httpx.Response(
             status_code=upstream_response.status_code,
             headers=upstream_response.headers,
@@ -559,6 +934,14 @@ async def forward_stream(
         )
         return _upstream_error_response(fallback), {}
 
+    increment_metric("proxy.upstream_success_total")
+    log_event(
+        "proxy.upstream_response",
+        provider_url=provider_url,
+        method="POST",
+        status=upstream_response.status_code,
+        duration_seconds=duration_seconds,
+    )
     state: dict[str, object] = {"usage": None, "upstream_id": None, "output_text": ""}
 
     async def stream_generator():
@@ -601,7 +984,6 @@ async def forward_stream(
                 yield chunk
         finally:
             await upstream_response.aclose()
-            await client.aclose()
 
     downstream_headers = _build_downstream_headers(upstream_response.headers)
     downstream_headers["Cache-Control"] = "no-cache"

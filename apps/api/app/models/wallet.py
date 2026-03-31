@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -26,6 +26,9 @@ class WalletAccount(Base):
 
 class WalletLedger(Base):
     __tablename__ = "wallet_ledger"
+    __table_args__ = (
+        UniqueConstraint("reference_type", "reference_id", "type", name="uq_wallet_ledger_reference"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -40,6 +43,9 @@ class WalletLedger(Base):
 
 class UsageReservation(Base):
     __tablename__ = "usage_reservations"
+    __table_args__ = (
+        Index("ix_usage_reservations_status_expires_at", "status", "expires_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

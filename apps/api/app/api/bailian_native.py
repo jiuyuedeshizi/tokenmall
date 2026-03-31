@@ -3,25 +3,26 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
-from app.api.deps import get_api_key_entity
-from app.db.session import get_db
+from app.api.deps import get_api_key_entity_async
+from app.db.session import AsyncSessionLocal, get_async_db
 from app.models import User
 from app.providers import get_bailian_provider_config
 from app.services.proxy import (
-    after_estimated_character_response,
-    after_response,
-    before_request,
+    after_estimated_character_response_async,
+    after_response_async,
+    before_request_async,
     forward_request,
     forward_stream,
-    on_error,
+    on_error_async,
 )
 from app.services.routing import (
     build_bailian_task_status_url,
-    resolve_bailian_multimodal_generation_route,
-    resolve_bailian_video_synthesis_route,
+    resolve_bailian_multimodal_generation_route_async,
+    resolve_bailian_video_synthesis_route_async,
 )
 
 router = APIRouter()
@@ -88,8 +89,8 @@ def _extract_video_usage_from_payload(payload: dict) -> dict:
     }
 
 
-def _resolve_request_identity(api_key, db: Session):
-    user = db.query(User).filter(User.id == api_key.user_id).first()
+async def _resolve_request_identity(api_key, db: AsyncSession):
+    user = (await db.execute(select(User).where(User.id == api_key.user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
@@ -98,8 +99,8 @@ def _resolve_request_identity(api_key, db: Session):
 @router.post("/api/v1/services/aigc/multimodal-generation/generation")
 async def bailian_multimodal_generation(
     request: Request,
-    api_key=Depends(get_api_key_entity),
-    db: Session = Depends(get_db),
+    api_key=Depends(get_api_key_entity_async),
+    db: AsyncSession = Depends(get_async_db),
 ):
     raw_body = await request.body()
     try:
@@ -110,10 +111,10 @@ async def bailian_multimodal_generation(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体必须是 JSON 对象")
 
-    user = _resolve_request_identity(api_key, db)
+    user = await _resolve_request_identity(api_key, db)
 
-    route_target = resolve_bailian_multimodal_generation_route(str(payload.get("model", "")), db)
-    request_id = before_request(api_key=api_key, user=user, payload=payload, model=route_target.model, db=db)
+    route_target = await resolve_bailian_multimodal_generation_route_async(str(payload.get("model", "")), db)
+    request_id = await before_request_async(api_key=api_key, user=user, payload=payload, model=route_target.model, db=db)
     stream_enabled = request.headers.get("x-dashscope-sse", "").strip().lower() == "enable"
     started_at = perf_counter()
 
@@ -127,29 +128,31 @@ async def bailian_multimodal_generation(
             )
         except Exception as exc:  # noqa: BLE001
             response_time_ms = int((perf_counter() - started_at) * 1000)
-            on_error(
-                api_key=api_key,
-                user=user,
-                request_id=request_id,
-                model_code=route_target.model.model_code,
-                error_message=str(exc),
-                response_time_ms=response_time_ms,
-                db=db,
-            )
+            async with AsyncSessionLocal() as error_db:
+                await on_error_async(
+                    api_key=api_key,
+                    user=user,
+                    request_id=request_id,
+                    model_code=route_target.model.model_code,
+                    error_message=str(exc),
+                    response_time_ms=response_time_ms,
+                    db=error_db,
+                )
             raise
 
         if isinstance(proxy_response, JSONResponse) and proxy_response.status_code >= 400:
             response_time_ms = int((perf_counter() - started_at) * 1000)
             body = json.loads(proxy_response.body.decode("utf-8"))
-            on_error(
-                api_key=api_key,
-                user=user,
-                request_id=request_id,
-                model_code=route_target.model.model_code,
-                error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
-                response_time_ms=response_time_ms,
-                db=db,
-            )
+            async with AsyncSessionLocal() as error_db:
+                await on_error_async(
+                    api_key=api_key,
+                    user=user,
+                    request_id=request_id,
+                    model_code=route_target.model.model_code,
+                    error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
+                    response_time_ms=response_time_ms,
+                    db=error_db,
+                )
             return proxy_response
 
         async def finalize_stream():
@@ -157,50 +160,54 @@ async def bailian_multimodal_generation(
             try:
                 usage = stream_state.get("usage")
                 if isinstance(usage, dict):
-                    after_response(
-                        api_key=api_key,
-                        user=user,
-                        model=route_target.model,
-                        request_id=request_id,
-                        response_payload={
-                            "id": stream_state.get("upstream_id") or request_id,
-                            "usage": usage,
-                        },
-                        response_time_ms=response_time_ms,
-                        db=db,
-                    )
+                    async with AsyncSessionLocal() as success_db:
+                        await after_response_async(
+                            api_key=api_key,
+                            user=user,
+                            model=route_target.model,
+                            request_id=request_id,
+                            response_payload={
+                                "id": stream_state.get("upstream_id") or request_id,
+                                "usage": usage,
+                            },
+                            response_time_ms=response_time_ms,
+                            db=success_db,
+                        )
                     return
                 if (route_target.model.billing_mode or "").strip().lower() == "per_10k_chars":
-                    after_estimated_character_response(
+                    async with AsyncSessionLocal() as success_db:
+                        await after_estimated_character_response_async(
+                            api_key=api_key,
+                            user=user,
+                            model=route_target.model,
+                            request_id=request_id,
+                            payload=payload,
+                            upstream_id=str(stream_state.get("upstream_id") or request_id),
+                            response_time_ms=response_time_ms,
+                            db=success_db,
+                        )
+                    return
+                async with AsyncSessionLocal() as error_db:
+                    await on_error_async(
                         api_key=api_key,
                         user=user,
-                        model=route_target.model,
                         request_id=request_id,
-                        payload=payload,
-                        upstream_id=str(stream_state.get("upstream_id") or request_id),
+                        model_code=route_target.model.model_code,
+                        error_message="流式响应未返回 usage 数据",
                         response_time_ms=response_time_ms,
-                        db=db,
+                        db=error_db,
                     )
-                    return
-                on_error(
-                    api_key=api_key,
-                    user=user,
-                    request_id=request_id,
-                    model_code=route_target.model.model_code,
-                    error_message="流式响应未返回 usage 数据",
-                    response_time_ms=response_time_ms,
-                    db=db,
-                )
             except Exception as exc:  # noqa: BLE001
-                on_error(
-                    api_key=api_key,
-                    user=user,
-                    request_id=request_id,
-                    model_code=route_target.model.model_code,
-                    error_message=str(exc),
-                    response_time_ms=response_time_ms,
-                    db=db,
-                )
+                async with AsyncSessionLocal() as error_db:
+                    await on_error_async(
+                        api_key=api_key,
+                        user=user,
+                        request_id=request_id,
+                        model_code=route_target.model.model_code,
+                        error_message=str(exc),
+                        response_time_ms=response_time_ms,
+                        db=error_db,
+                    )
 
         proxy_response.background = BackgroundTask(finalize_stream)
         return proxy_response
@@ -214,29 +221,31 @@ async def bailian_multimodal_generation(
         )
     except Exception as exc:  # noqa: BLE001
         response_time_ms = int((perf_counter() - started_at) * 1000)
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(exc),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(exc),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         raise
 
     if isinstance(proxy_response, JSONResponse) and proxy_response.status_code >= 400:
         response_time_ms = int((perf_counter() - started_at) * 1000)
         body = json.loads(proxy_response.body.decode("utf-8"))
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         return proxy_response
 
     response_time_ms = int((perf_counter() - started_at) * 1000)
@@ -244,28 +253,30 @@ async def bailian_multimodal_generation(
         response_payload = json.loads(proxy_response.body.decode("utf-8"))
         if not isinstance(response_payload, dict):
             raise ValueError("响应体必须是 JSON 对象")
-        after_response(
-            api_key=api_key,
-            user=user,
-            model=route_target.model,
-            request_id=request_id,
-            response_payload={
-                "id": response_payload.get("request_id", request_id),
-                "usage": _extract_bailian_usage(response_payload, route_target.model, payload),
-            },
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as success_db:
+            await after_response_async(
+                api_key=api_key,
+                user=user,
+                model=route_target.model,
+                request_id=request_id,
+                response_payload={
+                    "id": response_payload.get("request_id", request_id),
+                    "usage": _extract_bailian_usage(response_payload, route_target.model, payload),
+                },
+                response_time_ms=response_time_ms,
+                db=success_db,
+            )
     except Exception as exc:  # noqa: BLE001
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(exc),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(exc),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="上游响应缺少可结算 usage") from exc
     return proxy_response
 
@@ -273,8 +284,8 @@ async def bailian_multimodal_generation(
 @router.post("/api/v1/services/aigc/video-generation/video-synthesis")
 async def bailian_video_synthesis(
     request: Request,
-    api_key=Depends(get_api_key_entity),
-    db: Session = Depends(get_db),
+    api_key=Depends(get_api_key_entity_async),
+    db: AsyncSession = Depends(get_async_db),
 ):
     raw_body = await request.body()
     try:
@@ -285,9 +296,9 @@ async def bailian_video_synthesis(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体必须是 JSON 对象")
 
-    user = _resolve_request_identity(api_key, db)
-    route_target = resolve_bailian_video_synthesis_route(str(payload.get("model", "")), db)
-    request_id = before_request(api_key=api_key, user=user, payload=payload, model=route_target.model, db=db)
+    user = await _resolve_request_identity(api_key, db)
+    route_target = await resolve_bailian_video_synthesis_route_async(str(payload.get("model", "")), db)
+    request_id = await before_request_async(api_key=api_key, user=user, payload=payload, model=route_target.model, db=db)
     started_at = perf_counter()
 
     try:
@@ -299,29 +310,31 @@ async def bailian_video_synthesis(
         )
     except Exception as exc:  # noqa: BLE001
         response_time_ms = int((perf_counter() - started_at) * 1000)
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(exc),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(exc),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         raise
 
     if isinstance(proxy_response, JSONResponse) and proxy_response.status_code >= 400:
         response_time_ms = int((perf_counter() - started_at) * 1000)
         body = json.loads(proxy_response.body.decode("utf-8"))
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(body.get("error", {}).get("message") or body.get("message") or "模型服务调用失败"),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         return proxy_response
 
     response_time_ms = int((perf_counter() - started_at) * 1000)
@@ -331,28 +344,30 @@ async def bailian_video_synthesis(
             raise ValueError("响应体必须是 JSON 对象")
         output = response_payload.get("output")
         output = output if isinstance(output, dict) else {}
-        after_response(
-            api_key=api_key,
-            user=user,
-            model=route_target.model,
-            request_id=request_id,
-            response_payload={
-                "id": output.get("task_id") or response_payload.get("request_id") or request_id,
-                "usage": _extract_video_usage_from_payload(payload),
-            },
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as success_db:
+            await after_response_async(
+                api_key=api_key,
+                user=user,
+                model=route_target.model,
+                request_id=request_id,
+                response_payload={
+                    "id": output.get("task_id") or response_payload.get("request_id") or request_id,
+                    "usage": _extract_video_usage_from_payload(payload),
+                },
+                response_time_ms=response_time_ms,
+                db=success_db,
+            )
     except Exception as exc:  # noqa: BLE001
-        on_error(
-            api_key=api_key,
-            user=user,
-            request_id=request_id,
-            model_code=route_target.model.model_code,
-            error_message=str(exc),
-            response_time_ms=response_time_ms,
-            db=db,
-        )
+        async with AsyncSessionLocal() as error_db:
+            await on_error_async(
+                api_key=api_key,
+                user=user,
+                request_id=request_id,
+                model_code=route_target.model.model_code,
+                error_message=str(exc),
+                response_time_ms=response_time_ms,
+                db=error_db,
+            )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="上游响应缺少可结算 usage") from exc
     return proxy_response
 
@@ -361,10 +376,10 @@ async def bailian_video_synthesis(
 async def bailian_task_status(
     task_id: str,
     request: Request,
-    api_key=Depends(get_api_key_entity),
-    db: Session = Depends(get_db),
+    api_key=Depends(get_api_key_entity_async),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    _resolve_request_identity(api_key, db)
+    await _resolve_request_identity(api_key, db)
     provider_config = get_bailian_provider_config()
     provider_url = build_bailian_task_status_url(task_id)
     return await forward_request(

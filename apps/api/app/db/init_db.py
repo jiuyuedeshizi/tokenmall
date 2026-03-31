@@ -1,13 +1,13 @@
 from decimal import Decimal
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import Base, SessionLocal, engine
-from app.models import ApiKey, ModelCatalog, RefundRequest, User, WalletAccount
+from app.models import ModelCatalog, User, WalletAccount
 from app.services.official_model_catalog import OFFICIAL_MODEL_CATALOG
+
 
 def seed_official_model_catalog(db: Session):
     if db.query(ModelCatalog.id).first():
@@ -65,111 +65,6 @@ def initialize_database():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        inspector = inspect(engine)
-        wallet_columns = {column["name"] for column in inspector.get_columns("wallet_accounts")}
-        if "reserved_balance" not in wallet_columns:
-            db.execute(
-                text(
-                    "ALTER TABLE wallet_accounts "
-                    "ADD COLUMN reserved_balance NUMERIC(18,4) NOT NULL DEFAULT 0.0000"
-                )
-            )
-            db.commit()
-        api_key_columns = {column["name"] for column in inspector.get_columns("api_keys")}
-        if "encrypted_key" not in api_key_columns:
-            db.execute(
-                text(
-                    "ALTER TABLE api_keys "
-                    "ADD COLUMN encrypted_key VARCHAR(255) NOT NULL DEFAULT ''"
-                )
-            )
-            db.commit()
-        user_columns = {column["name"] for column in inspector.get_columns("users")}
-        if "phone" not in user_columns:
-            db.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(32)"))
-            db.commit()
-        db.execute(text("UPDATE users SET phone = '13800000000' WHERE email = :email AND (phone IS NULL OR phone = '')"), {"email": settings.admin_email})
-        db.commit()
-        model_columns = {column["name"] for column in inspector.get_columns("model_catalog")}
-        if "model_id" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN model_id VARCHAR(160) NOT NULL DEFAULT ''"))
-            db.commit()
-        if "capability_type" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN capability_type VARCHAR(32) NOT NULL DEFAULT 'chat'"))
-            db.commit()
-        if "vendor_display_name" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN vendor_display_name VARCHAR(120) NOT NULL DEFAULT ''"))
-            db.commit()
-        if "price_source" in model_columns:
-            db.execute(text("ALTER TABLE model_catalog DROP COLUMN price_source"))
-            db.commit()
-        if "billing_mode" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN billing_mode VARCHAR(32) NOT NULL DEFAULT 'token'"))
-            db.commit()
-        if "pricing_items" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN pricing_items TEXT NOT NULL DEFAULT '[]'"))
-            db.commit()
-        if "last_price_synced_at" in model_columns:
-            db.execute(text("ALTER TABLE model_catalog DROP COLUMN last_price_synced_at"))
-            db.commit()
-        if "rating" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN rating NUMERIC(4,2) NOT NULL DEFAULT 4.80"))
-            db.commit()
-        if "hero_description" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN hero_description TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "support_features" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN support_features TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "tags" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN tags TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "example_python" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN example_python TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "example_typescript" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN example_typescript TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "example_curl" not in model_columns:
-            db.execute(text("ALTER TABLE model_catalog ADD COLUMN example_curl TEXT NOT NULL DEFAULT ''"))
-            db.commit()
-        if "sync_status" in model_columns:
-            db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_status"))
-            db.commit()
-        if "sync_error" in model_columns:
-            db.execute(text("ALTER TABLE model_catalog DROP COLUMN sync_error"))
-            db.commit()
-        existing_tables = set(inspector.get_table_names())
-        if "bailian_model_cache" in existing_tables:
-            db.execute(text("DROP TABLE bailian_model_cache"))
-            db.commit()
-        if "model_price_snapshots" in existing_tables:
-            db.execute(text("DROP TABLE model_price_snapshots"))
-            db.commit()
-        usage_log_columns = {column["name"] for column in inspector.get_columns("usage_logs")}
-        if "response_time_ms" not in usage_log_columns:
-            db.execute(text("ALTER TABLE usage_logs ADD COLUMN response_time_ms INTEGER"))
-            db.commit()
-        if "billing_source" not in usage_log_columns:
-            db.execute(text("ALTER TABLE usage_logs ADD COLUMN billing_source VARCHAR(32) NOT NULL DEFAULT ''"))
-            db.commit()
-        reservation_columns = {column["name"] for column in inspector.get_columns("usage_reservations")}
-        if "billing_source" not in reservation_columns:
-            db.execute(text("ALTER TABLE usage_reservations ADD COLUMN billing_source VARCHAR(32) NOT NULL DEFAULT ''"))
-            db.commit()
-        payment_order_columns = {column["name"] for column in inspector.get_columns("payment_orders")}
-        if "channel_order_no" not in payment_order_columns:
-            db.execute(text("ALTER TABLE payment_orders ADD COLUMN channel_order_no VARCHAR(128)"))
-            db.commit()
-        if "payment_url" not in payment_order_columns:
-            db.execute(text("ALTER TABLE payment_orders ADD COLUMN payment_url VARCHAR(2000)"))
-            db.commit()
-        if "qr_code" not in payment_order_columns:
-            db.execute(text("ALTER TABLE payment_orders ADD COLUMN qr_code VARCHAR(2000)"))
-            db.commit()
-        if "qr_code_image" not in payment_order_columns:
-            db.execute(text("ALTER TABLE payment_orders ADD COLUMN qr_code_image VARCHAR(5000)"))
-            db.commit()
         seed_official_model_catalog(db)
         seed_admin(db)
         db.commit()

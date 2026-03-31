@@ -7,28 +7,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import proxy as proxy_api
-from app.api.deps import get_api_key_entity
-from app.db.session import get_db
+from app.api.deps import get_api_key_entity_async
+from app.db.session import get_async_db
 from app.main import http_exception_wrapper, unhandled_exception_wrapper
-
-
-class FakeQuery:
-    def __init__(self, result):
-        self.result = result
-
-    def filter(self, *args, **kwargs):  # noqa: ARG002
-        return self
-
-    def first(self):
-        return self.result
 
 
 class FakeDB:
     def __init__(self, user):
         self.user = user
 
-    def query(self, _entity):
-        return FakeQuery(self.user)
+    async def execute(self, _statement):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.user)
 
 
 class ProxyRouteTests(unittest.TestCase):
@@ -39,8 +28,14 @@ class ProxyRouteTests(unittest.TestCase):
         self.app.include_router(proxy_api.router, prefix="/v1")
         self.user = SimpleNamespace(id=7, status="active")
         self.api_key = SimpleNamespace(user_id=7)
-        self.app.dependency_overrides[get_api_key_entity] = lambda: self.api_key
-        self.app.dependency_overrides[get_db] = lambda: FakeDB(self.user)
+        async def fake_api_key_dependency():
+            return self.api_key
+
+        async def fake_db_dependency():
+            return FakeDB(self.user)
+
+        self.app.dependency_overrides[get_api_key_entity_async] = fake_api_key_dependency
+        self.app.dependency_overrides[get_async_db] = fake_db_dependency
         self.client = TestClient(self.app)
 
     def tearDown(self):
@@ -75,11 +70,11 @@ class ProxyRouteTests(unittest.TestCase):
             )
 
         with (
-            patch.object(proxy_api, "resolve_chat_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-plus"), provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
-            patch.object(proxy_api, "before_request", return_value="req_123"),
+            patch.object(proxy_api, "resolve_chat_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-plus"), provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
+            patch.object(proxy_api, "before_request_async", return_value="req_123"),
             patch.object(proxy_api, "forward_request", side_effect=fake_forward_request),
-            patch.object(proxy_api, "after_response") as after_response,
-            patch.object(proxy_api, "on_error") as on_error,
+            patch.object(proxy_api, "after_response_async") as after_response,
+            patch.object(proxy_api, "on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/v1/chat/completions",
@@ -110,11 +105,11 @@ class ProxyRouteTests(unittest.TestCase):
             )
 
         with (
-            patch.object(proxy_api, "resolve_chat_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="minimax-m2.5"), upstream_model_id="MiniMax-M2.5", provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
-            patch.object(proxy_api, "before_request", return_value="req_minimax"),
+            patch.object(proxy_api, "resolve_chat_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="minimax-m2.5"), upstream_model_id="MiniMax-M2.5", provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
+            patch.object(proxy_api, "before_request_async", return_value="req_minimax"),
             patch.object(proxy_api, "forward_request", side_effect=fake_forward_request),
-            patch.object(proxy_api, "after_response") as after_response,
-            patch.object(proxy_api, "on_error") as on_error,
+            patch.object(proxy_api, "after_response_async") as after_response,
+            patch.object(proxy_api, "on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/v1/chat/completions",
@@ -139,12 +134,12 @@ class ProxyRouteTests(unittest.TestCase):
             )
 
         with (
-            patch.object(proxy_api, "resolve_chat_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-plus"), provider_name="alibaba-bailian", provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
-            patch.object(proxy_api, "before_request", return_value="req_stream"),
+            patch.object(proxy_api, "resolve_chat_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-plus"), provider_name="alibaba-bailian", provider_url="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", provider_api_key="provider-secret", provider_headers={})),
+            patch.object(proxy_api, "before_request_async", return_value="req_stream"),
             patch.object(proxy_api, "forward_stream", side_effect=fake_forward_stream),
-            patch.object(proxy_api, "after_estimated_stream_response") as after_estimated_stream_response,
-            patch.object(proxy_api, "after_response") as after_response,
-            patch.object(proxy_api, "on_error") as on_error,
+            patch.object(proxy_api, "after_estimated_stream_response_async") as after_estimated_stream_response,
+            patch.object(proxy_api, "after_response_async") as after_response,
+            patch.object(proxy_api, "on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/v1/chat/completions",

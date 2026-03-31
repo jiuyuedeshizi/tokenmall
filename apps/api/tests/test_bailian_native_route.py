@@ -7,27 +7,16 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app.api.bailian_native import router as bailian_native_router
-from app.api.deps import get_api_key_entity
-from app.db.session import get_db
-
-
-class FakeQuery:
-    def __init__(self, result):
-        self.result = result
-
-    def filter(self, *args, **kwargs):  # noqa: ARG002
-        return self
-
-    def first(self):
-        return self.result
+from app.api.deps import get_api_key_entity_async
+from app.db.session import get_async_db
 
 
 class FakeDB:
     def __init__(self, user):
         self.user = user
 
-    def query(self, _entity):
-        return FakeQuery(self.user)
+    async def execute(self, _statement):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.user)
 
 
 class BailianNativeRouteTests(unittest.TestCase):
@@ -36,8 +25,15 @@ class BailianNativeRouteTests(unittest.TestCase):
         self.app.include_router(bailian_native_router)
         self.user = SimpleNamespace(id=7, status="active")
         self.api_key = SimpleNamespace(user_id=7)
-        self.app.dependency_overrides[get_api_key_entity] = lambda: self.api_key
-        self.app.dependency_overrides[get_db] = lambda: FakeDB(self.user)
+
+        async def fake_api_key_dependency():
+            return self.api_key
+
+        async def fake_db_dependency():
+            return FakeDB(self.user)
+
+        self.app.dependency_overrides[get_api_key_entity_async] = fake_api_key_dependency
+        self.app.dependency_overrides[get_async_db] = fake_db_dependency
         self.client = TestClient(self.app)
 
     def tearDown(self):
@@ -64,11 +60,11 @@ class BailianNativeRouteTests(unittest.TestCase):
             )
 
         with (
-            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-image-2.0-pro"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
-            patch("app.api.bailian_native.before_request", return_value="req_image"),
+            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen-image-2.0-pro"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
+            patch("app.api.bailian_native.before_request_async", return_value="req_image"),
             patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request),
-            patch("app.api.bailian_native.after_response") as after_response,
-            patch("app.api.bailian_native.on_error") as on_error,
+            patch("app.api.bailian_native.after_response_async") as after_response,
+            patch("app.api.bailian_native.on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/api/v1/services/aigc/multimodal-generation/generation",
@@ -102,11 +98,11 @@ class BailianNativeRouteTests(unittest.TestCase):
             )
 
         with (
-            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen3-tts-vd-2026-01-26", billing_mode="per_10k_chars"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
-            patch("app.api.bailian_native.before_request", return_value="req_tts"),
+            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen3-tts-vd-2026-01-26", billing_mode="per_10k_chars"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
+            patch("app.api.bailian_native.before_request_async", return_value="req_tts"),
             patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request),
-            patch("app.api.bailian_native.after_response") as after_response,
-            patch("app.api.bailian_native.on_error") as on_error,
+            patch("app.api.bailian_native.after_response_async") as after_response,
+            patch("app.api.bailian_native.on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/api/v1/services/aigc/multimodal-generation/generation",
@@ -130,12 +126,12 @@ class BailianNativeRouteTests(unittest.TestCase):
             )
 
         with (
-            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen3-tts-vd-2026-01-26", billing_mode="per_10k_chars"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
-            patch("app.api.bailian_native.before_request", return_value="req_tts_stream"),
+            patch("app.api.bailian_native.resolve_bailian_multimodal_generation_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="qwen3-tts-vd-2026-01-26", billing_mode="per_10k_chars"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", provider_api_key="provider-secret", provider_headers={})),
+            patch("app.api.bailian_native.before_request_async", return_value="req_tts_stream"),
             patch("app.api.bailian_native.forward_stream", side_effect=fake_forward_stream),
-            patch("app.api.bailian_native.after_estimated_character_response") as after_estimated_character_response,
-            patch("app.api.bailian_native.after_response") as after_response,
-            patch("app.api.bailian_native.on_error") as on_error,
+            patch("app.api.bailian_native.after_estimated_character_response_async") as after_estimated_character_response,
+            patch("app.api.bailian_native.after_response_async") as after_response,
+            patch("app.api.bailian_native.on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/api/v1/services/aigc/multimodal-generation/generation",
@@ -173,11 +169,11 @@ class BailianNativeRouteTests(unittest.TestCase):
             )
 
         with (
-            patch("app.api.bailian_native.resolve_bailian_video_synthesis_route", return_value=SimpleNamespace(model=SimpleNamespace(model_code="wan2.6-i2v-flash", billing_mode="per_second"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", provider_api_key="provider-secret", provider_headers={})),
-            patch("app.api.bailian_native.before_request", return_value="req_video"),
+            patch("app.api.bailian_native.resolve_bailian_video_synthesis_route_async", return_value=SimpleNamespace(model=SimpleNamespace(model_code="wan2.6-i2v-flash", billing_mode="per_second"), provider_url="https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis", provider_api_key="provider-secret", provider_headers={})),
+            patch("app.api.bailian_native.before_request_async", return_value="req_video"),
             patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request),
-            patch("app.api.bailian_native.after_response") as after_response,
-            patch("app.api.bailian_native.on_error") as on_error,
+            patch("app.api.bailian_native.after_response_async") as after_response,
+            patch("app.api.bailian_native.on_error_async") as on_error,
         ):
             response = self.client.post(
                 "/api/v1/services/aigc/video-generation/video-synthesis",
