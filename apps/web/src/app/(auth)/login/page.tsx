@@ -168,12 +168,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#f6f8fc] text-[#172033]">
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="hidden border-r border-[#e8edf5] bg-[linear-gradient(180deg,#fbfdff_0%,#f4f8ff_100%)] lg:block">
-          <div className="px-12 pt-20">
-            <div className="flex h-[180px] w-[360px] items-center justify-center">
-              <Image alt="忆捷EAGET" className="h-auto w-[240px]" height={64} priority src="/logo.jpg" width={240} />
-            </div>
-          </div>
+        <section className="relative hidden min-h-screen overflow-hidden border-r border-[#e8edf5] bg-[#dcecff] lg:block">
+          <Image alt="忆捷EAGET 登录页视觉" className="object-cover object-center" fill priority sizes="50vw" src="/login-hero.png" />
         </section>
 
         <section className="flex items-center justify-center bg-white px-6 py-10 lg:px-12">

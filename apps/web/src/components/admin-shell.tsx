@@ -32,7 +32,7 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-[#f7f9fc] text-[#172033]">
       <header className="border-b border-[#e2e8f0] bg-white">
-        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-8 py-1.5 xl:px-10">
+        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-8 py-0.5 xl:px-10">
           <PlatformBrand href="/admin" />
 
           <div className="flex items-center gap-3">
@@ -67,13 +67,13 @@ export function AdminShell({
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-[1440px] items-center gap-8 px-8 xl:px-10">
+        <nav className="mx-auto -mt-1 flex max-w-[1440px] items-center gap-8 px-8 xl:px-10">
           {adminNavItems.map((item) => {
             const active = pathname === item.href;
             return (
               <Link
                 key={item.href}
-                className={`relative py-3.5 text-[15px] font-semibold ${
+                className={`relative py-3 text-[15px] font-semibold ${
                   active ? "text-[#315efb]" : "text-[#4d596a]"
                 }`}
                 href={item.href}

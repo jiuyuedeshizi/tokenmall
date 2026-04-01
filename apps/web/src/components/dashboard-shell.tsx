@@ -256,26 +256,16 @@ export function DashboardShell({
   }
 
   async function handleCloseSettings() {
-    if (!mustCompleteProfile) {
-      setSettingsOpen(false);
-      return;
-    }
-
     try {
       const refreshed = await apiFetch<UserInfo>("/auth/me");
       setCurrentUser(refreshed);
       setProfileName(refreshed.name);
       setProfileEmail(refreshed.email ?? "");
-      if (refreshed.profile_completed) {
-        setSettingsOpen(false);
-        return;
-      }
     } catch {
-      setNotice("资料状态刷新失败，请稍后重试");
-      return;
+      setNotice("资料状态刷新失败，已保留当前页面信息");
     }
 
-    setNotice("还有资料未完成，请先完成后再关闭");
+    setSettingsOpen(false);
   }
 
   const mustCompleteProfile = !currentUser.profile_completed;
@@ -291,7 +281,7 @@ export function DashboardShell({
         </div>
       ) : null}
       <header className="border-b border-[var(--line)] bg-white">
-        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-8 py-1.5 xl:px-10">
+        <div className="mx-auto flex max-w-[1440px] items-center justify-between px-8 py-0.5 xl:px-10">
           <PlatformBrand href="/overview" />
 
           <div className="flex items-center gap-4">
@@ -356,7 +346,7 @@ export function DashboardShell({
           </div>
         </div>
 
-        <nav className="mx-auto flex max-w-[1440px] items-center gap-8 px-8 xl:px-10">
+        <nav className="mx-auto -mt-1 flex max-w-[1440px] items-center gap-8 px-8 xl:px-10">
           {navItems.map((item) => {
             const active = pathname === item.href;
             const Icon = item.icon;
@@ -364,7 +354,7 @@ export function DashboardShell({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`relative flex items-center gap-3 py-3.5 text-[15px] font-semibold transition ${
+                className={`relative flex items-center gap-3 py-3 text-[15px] font-semibold transition ${
                   active ? "text-[#315efb]" : "text-[#4d596a] hover:text-[#172033]"
                 }`}
               >
