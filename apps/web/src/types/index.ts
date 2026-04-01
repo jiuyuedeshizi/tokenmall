@@ -1,10 +1,13 @@
 export type UserInfo = {
   id: number;
-  email: string;
+  email: string | null;
   phone?: string | null;
   name: string;
   role: "user" | "admin";
   status: string;
+  email_verified: boolean;
+  has_password: boolean;
+  profile_completed: boolean;
 };
 
 export type Wallet = {
@@ -76,6 +79,9 @@ export type UsageLog = {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  billing_quantity?: number;
+  billing_unit?: string;
+  billing_mode?: string;
   amount: string;
   billing_source?: string;
   status: string;
@@ -116,7 +122,10 @@ export type DashboardSummary = {
     time: string;
     title: string;
     subtitle: string;
-    tokens: number;
+    status?: string;
+    billing_quantity: number;
+    billing_unit?: string;
+    billing_mode?: string;
     amount: string;
   }[];
   monthly_usage: { label: string; value: number }[];
@@ -172,7 +181,7 @@ export type AdminOverview = {
 
 export type AdminUser = {
   id: number;
-  email: string;
+  email: string | null;
   name: string;
   role: string;
   status: string;
@@ -184,20 +193,20 @@ export type AdminUser = {
 
 export type AdminOrder = PaymentOrder & {
   user_id: number;
-  user_email: string;
+  user_email: string | null;
   user_name: string;
 };
 
 export type AdminApiKey = ApiKey & {
   user_id: number;
-  user_email: string;
+  user_email: string | null;
   user_name: string;
 };
 
 export type AdminLedger = {
   id: number;
   user_id: number;
-  user_email: string;
+  user_email: string | null;
   user_name: string;
   type: string;
   amount: string;
@@ -210,7 +219,7 @@ export type AdminLedger = {
 
 export type AdminUsage = UsageLog & {
   user_id: number;
-  user_email: string;
+  user_email: string | null;
   user_name: string;
   api_key_id: number | null;
 };
@@ -222,7 +231,7 @@ export type AdminModel = ModelInfo & {
 
 export type AdminRefund = RefundRequest & {
   user_id: number;
-  user_email: string;
+  user_email: string | null;
   user_name: string;
 };
 

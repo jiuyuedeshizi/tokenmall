@@ -71,6 +71,29 @@ class Settings(BaseSettings):
     proxy_http_write_timeout_seconds: float = Field(default=30.0, alias="PROXY_HTTP_WRITE_TIMEOUT_SECONDS")
     proxy_http_pool_timeout_seconds: float = Field(default=5.0, alias="PROXY_HTTP_POOL_TIMEOUT_SECONDS")
     proxy_stream_pending_limit_bytes: int = Field(default=262144, alias="PROXY_STREAM_PENDING_LIMIT_BYTES")
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=465, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="", alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="TokenMall", alias="SMTP_FROM_NAME")
+    smtp_use_ssl: bool = Field(default=True, alias="SMTP_USE_SSL")
+    smtp_use_tls: bool = Field(default=False, alias="SMTP_USE_TLS")
+    alibaba_cloud_access_key_id: str = Field(default="", alias="ALIBABA_CLOUD_ACCESS_KEY_ID")
+    alibaba_cloud_access_key_secret: str = Field(default="", alias="ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+    alibaba_cloud_sms_region: str = Field(default="cn-hangzhou", alias="ALIBABA_CLOUD_SMS_REGION")
+    alibaba_cloud_sms_auth_enabled: bool = Field(default=False, alias="ALIBABA_CLOUD_SMS_AUTH_ENABLED")
+    alibaba_cloud_sms_sign_name: str = Field(default="", alias="ALIBABA_CLOUD_SMS_SIGN_NAME")
+    alibaba_cloud_sms_template_code: str = Field(default="", alias="ALIBABA_CLOUD_SMS_TEMPLATE_CODE")
+    alibaba_cloud_sms_template_param: str = Field(
+        default='{"code":"##code##","min":"5"}',
+        alias="ALIBABA_CLOUD_SMS_TEMPLATE_PARAM",
+    )
+    alibaba_cloud_sms_scheme_name: str = Field(default="", alias="ALIBABA_CLOUD_SMS_SCHEME_NAME")
+    alibaba_cloud_sms_debug_return_demo_code: bool = Field(
+        default=True,
+        alias="ALIBABA_CLOUD_SMS_DEBUG_RETURN_DEMO_CODE",
+    )
 
     @property
     def cors_origins(self) -> list[str]:

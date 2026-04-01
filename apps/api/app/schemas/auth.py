@@ -13,6 +13,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CodeSendResponse(BaseModel):
+    success: bool
+    demo_code: str | None = None
+    message: str | None = None
+    cooldown_seconds: int | None = None
+
+
+class RegisterResponse(CodeSendResponse):
+    email: EmailStr
+    requires_email_verification: bool = True
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -27,13 +39,30 @@ class PhoneLoginRequest(BaseModel):
     code: str = Field(min_length=4, max_length=8)
 
 
+class SendEmailCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailLoginRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=8)
+
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=8)
+
+
 class UserInfo(BaseModel):
     id: int
-    email: EmailStr
+    email: EmailStr | None = None
     phone: str | None = None
     name: str
     role: str
     status: str
+    email_verified: bool
+    has_password: bool
+    profile_completed: bool
 
     model_config = {"from_attributes": True}
 
@@ -43,5 +72,5 @@ class UpdateProfileRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str = Field(min_length=8)
+    current_password: str | None = Field(default=None, min_length=8)
     new_password: str = Field(min_length=8)

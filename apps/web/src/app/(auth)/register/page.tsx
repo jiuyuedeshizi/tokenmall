@@ -39,7 +39,7 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-[#f5f8ff] px-6 py-10 text-[#172033]">
       <div className="mx-auto grid min-h-[calc(100vh-80px)] max-w-[1320px] overflow-hidden rounded-[36px] border border-[#e4ebf5] bg-white shadow-[0_24px_60px_rgba(33,80,163,0.08)] lg:grid-cols-[0.95fr_1.05fr]">
         <div className="hidden bg-[radial-gradient(circle_at_top_left,#dce8ff_0%,#edf3ff_38%,#ffffff_74%)] p-12 lg:flex lg:flex-col lg:justify-between">
-          <Image alt="EAGET" className="h-auto w-[180px]" height={45} priority src="/eaget-logo.svg" width={180} />
+          <Image alt="EAGET" className="h-auto w-[180px]" height={45} priority src="/logo.jpg" width={180} />
           <div className="max-w-[360px]">
             <div className="text-[44px] font-black leading-[1.05] tracking-[-0.05em]">Create your AI commerce workspace.</div>
             <p className="mt-6 text-[17px] leading-8 text-[#5d6b82]">
@@ -52,7 +52,7 @@ export default function RegisterPage() {
           <form className="w-full max-w-[560px]" onSubmit={handleSubmit}>
             <div className="mb-10">
               <h1 className="text-[40px] font-black tracking-[-0.04em]">创建账号</h1>
-              <p className="mt-3 text-[17px] text-[#5d6b82]">完成基础信息后即可进入控制台开始使用。</p>
+              <p className="mt-3 text-[17px] text-[#5d6b82]">完成基础信息后即可进入控制台，邮箱激活可在个人中心里完成。</p>
             </div>
 
             <div className="space-y-5">

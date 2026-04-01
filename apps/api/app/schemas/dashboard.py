@@ -7,7 +7,10 @@ class DashboardActivity(BaseModel):
     time: str
     title: str
     subtitle: str
-    tokens: int
+    status: str = "success"
+    billing_quantity: int = 0
+    billing_unit: str = "token"
+    billing_mode: str = "token"
     amount: Decimal
 
 

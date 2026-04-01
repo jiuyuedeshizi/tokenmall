@@ -209,3 +209,25 @@ class BailianNativeRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["output"]["task_status"], "SUCCEEDED")
+
+    def test_tts_customization_route_forwards_post(self):
+        raw_body = b'{"model":"qwen-voice-design","input":{"action":"list","page_size":10,"page_index":0}}'
+
+        async def fake_forward_request(request, provider_url, api_key, provider_headers=None, method="POST"):  # noqa: ARG001
+            self.assertEqual(method, "POST")
+            self.assertEqual(await request.body(), raw_body)
+            self.assertTrue(provider_url.endswith("/api/v1/services/audio/tts/customization"))
+            return JSONResponse(
+                status_code=200,
+                content={"voices": [{"voice": "demo_voice"}]},
+            )
+
+        with patch("app.api.bailian_native.forward_request", side_effect=fake_forward_request):
+            response = self.client.post(
+                "/api/v1/services/audio/tts/customization",
+                content=raw_body,
+                headers={"Authorization": "Bearer tk_live_unit", "Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["voices"][0]["voice"], "demo_voice")

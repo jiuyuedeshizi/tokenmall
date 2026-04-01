@@ -24,6 +24,19 @@ function formatBillingSource(value?: string) {
   return value || "未标记";
 }
 
+function formatBillingQuantity(quantity: number, unit?: string) {
+  switch ((unit ?? "token").trim().toLowerCase()) {
+    case "image":
+      return `${quantity} 张`;
+    case "second":
+      return `${quantity} 秒`;
+    case "char":
+      return `${quantity} 字符`;
+    default:
+      return `${quantity} tokens`;
+  }
+}
+
 export default function AdminUsagePage() {
   const [items, setItems] = useState<AdminUsage[]>([]);
   const [page, setPage] = useState(1);
@@ -71,7 +84,7 @@ export default function AdminUsagePage() {
                   <div className="mt-4 grid gap-3 text-sm text-[#4d596a] md:grid-cols-4">
                     <div>输入: {item.input_tokens}</div>
                     <div>输出: {item.output_tokens}</div>
-                    <div>总量: {item.total_tokens}</div>
+                    <div>计费量: {formatBillingQuantity(item.billing_quantity ?? item.total_tokens, item.billing_unit)}</div>
                     <div>费用: ¥{item.amount}</div>
                   </div>
                   {item.error_message ? (

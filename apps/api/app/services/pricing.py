@@ -11,6 +11,7 @@ MODEL_ALIASES = {
     "qwen/qwen-turbo": "qwen-turbo",
     "qwen/qwen-max-latest": "qwen-max",
 }
+AMOUNT_PRECISION = Decimal("0.000001")
 
 
 def get_model_or_404(model_code: str, db: Session) -> ModelCatalog:
@@ -90,14 +91,14 @@ def calculate_usage_cost(
         if image_count <= 0:
             return Decimal("0.0000")
         return (Decimal(image_count) * _price_from_first_pricing_item(model)).quantize(
-            Decimal("0.0001"),
+            AMOUNT_PRECISION,
             rounding=ROUND_HALF_UP,
         )
     if billing_mode == "per_10k_chars":
         if char_count <= 0:
             return Decimal("0.0000")
         return ((Decimal(char_count) / Decimal("10000")) * _price_from_first_pricing_item(model)).quantize(
-            Decimal("0.0001"),
+            AMOUNT_PRECISION,
             rounding=ROUND_HALF_UP,
         )
     if billing_mode == "per_second":
@@ -105,11 +106,11 @@ def calculate_usage_cost(
             return Decimal("0.0000")
         unit_price = resolve_per_second_unit_price(model, resolution=resolution, audio=audio)
         return (Decimal(second_count) * unit_price).quantize(
-            Decimal("0.0001"),
+            AMOUNT_PRECISION,
             rounding=ROUND_HALF_UP,
         )
     if billing_mode != "token":
         return Decimal("0.0000")
     input_cost = (Decimal(prompt_tokens) / Decimal("1000000")) * Decimal(model.input_price_per_million)
     output_cost = (Decimal(completion_tokens) / Decimal("1000000")) * Decimal(model.output_price_per_million)
-    return (input_cost + output_cost).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    return (input_cost + output_cost).quantize(AMOUNT_PRECISION, rounding=ROUND_HALF_UP)

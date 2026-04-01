@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Panel } from "@/components/panel";
 import { apiFetch } from "@/lib/api";
+import { formatBillingAmount, formatBillingQuantity } from "@/lib/billing-display";
 import type { DashboardSummary } from "@/types";
 
 function PulseIcon() {
@@ -337,10 +338,14 @@ export default function OverviewPage() {
                     <span className="truncate text-[#667085]">({item.subtitle})</span>
                   </div>
                   <div className="flex items-center gap-7 whitespace-nowrap text-right">
-                    <div className="text-[15px] text-[#667085]">
-                      {item.tokens > 0 ? `${item.tokens} tokens` : ""}
+                    <div className="w-[88px] text-[15px] text-[#667085]">
+                      {formatBillingQuantity(item)}
                     </div>
-                    <div className="text-[16px] font-semibold text-[#16a34a]">¥{item.amount}</div>
+                    <div className="w-[110px] text-[16px] font-semibold text-[#16a34a]">
+                      {formatBillingAmount(item.amount, item.status) === "-"
+                        ? "-"
+                        : `¥${formatBillingAmount(item.amount, item.status)}`}
+                    </div>
                   </div>
                 </div>
               ))}

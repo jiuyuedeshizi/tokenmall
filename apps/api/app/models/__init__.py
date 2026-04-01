@@ -4,6 +4,7 @@ from app.models.payment import PaymentOrder
 from app.models.refund import RefundItem, RefundRequest
 from app.models.usage_log import UsageLog
 from app.models.user import User
+from app.models.verification_code import VerificationCode
 from app.models.wallet import UsageReservation, WalletAccount, WalletLedger
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "UsageLog",
     "UsageReservation",
     "User",
+    "VerificationCode",
     "WalletAccount",
     "WalletLedger",
 ]

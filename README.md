@@ -29,6 +29,19 @@ BAILIAN_API_KEY=你的阿里百炼API Key
 TENCENT_API_KEY=你的腾讯API Key（如需启用腾讯 provider）
 ```
 
+如需启用邮箱验证码登录，再补充：
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_USERNAME=your-account
+SMTP_PASSWORD=your-password
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_FROM_NAME=TokenMall
+SMTP_USE_SSL=true
+SMTP_USE_TLS=false
+```
+
 ### 2. 启动依赖服务
 
 只启动 `PostgreSQL / Redis`。这个命令会使用 [docker-compose.dev.yml](/Users/jh/projects/tokenmall/infra/docker/docker-compose.dev.yml)：

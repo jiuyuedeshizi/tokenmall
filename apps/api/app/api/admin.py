@@ -12,6 +12,7 @@ from app.models import ApiKey, ModelCatalog, PaymentOrder, RefundItem, RefundReq
 from app.schemas.admin import AdjustBalanceRequest, AdminResetPasswordRequest, CreateModelRequest, UpdateModelRequest
 from app.services.api_keys import delete_api_key as delete_api_key_service
 from app.services.auth import admin_reset_password
+from app.services.billing_usage import infer_billing_quantity, resolve_billing_unit
 from app.services.official_model_catalog import get_official_model_examples
 from app.services.payments import create_payment_provider
 from app.services.wallet import apply_balance_change, mark_order_paid
@@ -576,6 +577,13 @@ def list_usage_logs(
     total = query.count()
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
     users = {user.id: user for user in db.query(User).all()}
+    model_meta_map = {
+        row.model_code: {
+            "billing_mode": row.billing_mode,
+            "pricing_items": row.pricing_items,
+        }
+        for row in db.query(ModelCatalog.model_code, ModelCatalog.billing_mode, ModelCatalog.pricing_items).all()
+    }
     items = [
         {
             "id": row.id,
@@ -588,6 +596,14 @@ def list_usage_logs(
             "input_tokens": row.input_tokens,
             "output_tokens": row.output_tokens,
             "total_tokens": row.total_tokens,
+            "billing_quantity": infer_billing_quantity(
+                total_tokens=row.total_tokens,
+                billing_mode=model_meta_map.get(row.model_code, {}).get("billing_mode", "token"),
+                billing_quantity=getattr(row, "billing_quantity", 0),
+                amount=Decimal(row.amount),
+                pricing_items=model_meta_map.get(row.model_code, {}).get("pricing_items"),
+            ),
+            "billing_unit": getattr(row, "billing_unit", "") or resolve_billing_unit(model_meta_map.get(row.model_code, {}).get("billing_mode", "token")),
             "amount": row.amount,
             "billing_source": row.billing_source,
             "status": row.status,

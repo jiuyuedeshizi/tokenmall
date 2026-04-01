@@ -7,8 +7,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tokenmall
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -16,8 +14,6 @@ services:
     image: redis:7
     container_name: tokenmall-redis
     restart: always
-    ports:
-      - "6379:6379"
 
   api:
     build:
@@ -25,7 +21,7 @@ services:
     container_name: tokenmall-api
     restart: always
     environment:
-      APP_ENV: development
+      APP_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/tokenmall
@@ -35,7 +31,7 @@ services:
       BAILIAN_API_BASE: ${BAILIAN_API_BASE:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       TENCENT_API_KEY: ${TENCENT_API_KEY:-}
       TENCENT_API_BASE: ${TENCENT_API_BASE:-}
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://49.232.143.230:13000}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tokenmall.dev}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123456}
     ports:
@@ -50,9 +46,11 @@ services:
     container_name: tokenmall-web
     restart: always
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+      INTERNAL_API_PROXY_TARGET: http://api:8000
     ports:
-      - "3000:3000"
+      - "13001:3000"
     depends_on:
       - api
 

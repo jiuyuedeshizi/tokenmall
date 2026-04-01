@@ -44,6 +44,14 @@ python -m venv .venv
 - `BAILIAN_API_BASE`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `SMTP_FROM_NAME`
+- `SMTP_USE_SSL`
+- `SMTP_USE_TLS`
 - `PROXY_HTTP_CONNECT_TIMEOUT_SECONDS`
 - `PROXY_HTTP_READ_TIMEOUT_SECONDS`
 - `PROXY_HTTP_WRITE_TIMEOUT_SECONDS`
@@ -67,6 +75,7 @@ PROXY_STREAM_PENDING_LIMIT_BYTES=262144
 说明：
 
 - `DB_POOL_*` 只对 PostgreSQL 这类连接池数据库生效，SQLite 会自动跳过。
+- `SMTP_*` 用于邮箱验证码登录；未配置时接口仍可用，但只返回演示验证码，不会实际发信。
 - `PROXY_HTTP_*` 控制转发到上游模型服务时的连接、读取、写入和连接池等待超时。
 - `PROXY_STREAM_PENDING_LIMIT_BYTES` 用来限制流式 SSE 解析时单次未完成缓冲的最大字节数，避免无换行上游导致内存持续增长。
 

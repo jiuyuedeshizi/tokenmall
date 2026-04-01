@@ -10,7 +10,7 @@ import httpx
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.services.proxy import after_estimated_stream_response, before_request, forward_request, forward_stream
+from app.services.proxy import after_estimated_stream_response, after_response, before_request, forward_request, forward_stream
 from app.services.routing import resolve_chat_route
 
 
@@ -54,6 +54,12 @@ class FakeDB:
 
     def query(self, _entity):
         return FakeQuery(self.model)
+
+    def add(self, _entity):
+        pass
+
+    def commit(self):
+        pass
 
 
 class FakeAsyncClientNonStream:
@@ -386,7 +392,7 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(request_id.startswith("req_"))
         self.assertEqual(create_reservation.call_args.kwargs["estimated_input_tokens"], 18)
         self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 0)
-        self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.0015"))
+        self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.001584"))
 
     async def test_before_request_estimates_per_second_reservation(self):
         api_key = SimpleNamespace(
@@ -425,6 +431,139 @@ class ProxyServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_reservation.call_args.kwargs["estimated_input_tokens"], 5)
         self.assertEqual(create_reservation.call_args.kwargs["estimated_output_tokens"], 0)
         self.assertEqual(create_reservation.call_args.kwargs["reserved_amount"], Decimal("0.8250"))
+
+    async def test_after_response_uses_seconds_field_for_per_second_billing(self):
+        api_key = SimpleNamespace(
+            id=1,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.0000"),
+            last_used_at=None,
+            budget_limit=None,
+            token_limit=None,
+            request_limit=None,
+            status="active",
+        )
+        user = SimpleNamespace(id=1)
+        model = SimpleNamespace(
+            model_code="qwen3-asr-flash",
+            billing_mode="per_second",
+            pricing_items='[{"label":"语音识别","unit":"元/每秒","price":"0.00022"}]',
+            input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            display_name="Qwen ASR",
+        )
+        db = FakeDB(model)
+
+        with patch("app.services.proxy.capture_usage_reservation") as capture_usage_reservation:
+            after_response(
+                api_key=api_key,
+                user=user,
+                model=model,
+                request_id="req_asr",
+                response_payload={
+                    "id": "chatcmpl-asr",
+                    "usage": {
+                        "prompt_tokens": 42,
+                        "completion_tokens": 12,
+                        "total_tokens": 54,
+                        "seconds": 1,
+                    },
+                },
+                response_time_ms=123,
+                db=db,
+            )
+
+        self.assertEqual(api_key.used_tokens, 1)
+        self.assertEqual(api_key.used_requests, 1)
+        self.assertEqual(api_key.used_amount, Decimal("0.000220"))
+        capture_usage_reservation.assert_called_once()
+
+    async def test_after_response_keeps_small_token_amounts_above_zero(self):
+        api_key = SimpleNamespace(
+            id=1,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.000000"),
+            last_used_at=None,
+            budget_limit=None,
+            token_limit=None,
+            request_limit=None,
+            status="active",
+        )
+        user = SimpleNamespace(id=1)
+        model = SimpleNamespace(
+            model_code="qwen-plus",
+            billing_mode="token",
+            pricing_items='[{"label":"输入","unit":"元/百万Token","price":"0.8"},{"label":"输出","unit":"元/百万Token","price":"4.8"}]',
+            input_price_per_million=Decimal("0.8"),
+            output_price_per_million=Decimal("4.8"),
+            display_name="Qwen Plus",
+        )
+        db = FakeDB(model)
+
+        with patch("app.services.proxy.capture_usage_reservation"):
+            after_response(
+                api_key=api_key,
+                user=user,
+                model=model,
+                request_id="req_qwen_plus",
+                response_payload={
+                    "id": "chatcmpl-qwen-plus",
+                    "usage": {
+                        "prompt_tokens": 12,
+                        "completion_tokens": 1,
+                        "total_tokens": 13,
+                    },
+                },
+                response_time_ms=123,
+                db=db,
+            )
+
+        self.assertEqual(api_key.used_tokens, 13)
+        self.assertEqual(api_key.used_amount, Decimal("0.000014"))
+
+    async def test_after_response_uses_characters_field_for_per_10k_chars_billing(self):
+        api_key = SimpleNamespace(
+            id=1,
+            used_tokens=0,
+            used_requests=0,
+            used_amount=Decimal("0.000000"),
+            last_used_at=None,
+            budget_limit=None,
+            token_limit=None,
+            request_limit=None,
+            status="active",
+        )
+        user = SimpleNamespace(id=1)
+        model = SimpleNamespace(
+            model_code="qwen3-tts-vd-2026-01-26",
+            billing_mode="per_10k_chars",
+            pricing_items='[{"label":"语音合成","unit":"元/每万字符","price":"0.8"}]',
+            input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            display_name="Qwen TTS VD",
+        )
+        db = FakeDB(model)
+
+        with patch("app.services.proxy.capture_usage_reservation"):
+            after_response(
+                api_key=api_key,
+                user=user,
+                model=model,
+                request_id="req_qwen_tts_vd",
+                response_payload={
+                    "id": "tts-vd-1",
+                    "usage": {
+                        "characters": 48,
+                    },
+                },
+                response_time_ms=123,
+                db=db,
+            )
+
+        self.assertEqual(api_key.used_tokens, 48)
+        self.assertEqual(api_key.used_amount, Decimal("0.003840"))
 
 
 class RoutingTests(unittest.TestCase):

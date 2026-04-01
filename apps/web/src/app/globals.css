@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
 :root {
+  --font-sans:
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    sans-serif;
+  --font-display:
+    "Avenir Next",
+    "Helvetica Neue",
+    "Segoe UI",
+    sans-serif;
   --page-bg: #f5f7fb;
   --surface: #ffffff;
   --surface-hover: #eef4ff;

@@ -46,6 +46,8 @@ def seed_admin(db: Session):
     if admin:
         if not admin.phone:
             admin.phone = "13800000000"
+        if not admin.email_verified:
+            admin.email_verified = True
         return
 
     admin = User(
@@ -55,6 +57,7 @@ def seed_admin(db: Session):
         name="管理员",
         role="admin",
         status="active",
+        email_verified=True,
     )
     db.add(admin)
     db.flush()

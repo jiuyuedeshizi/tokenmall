@@ -3,6 +3,7 @@ FROM node:22-alpine
 WORKDIR /app
 
 RUN corepack enable
+RUN pnpm config set registry https://registry.npmmirror.com
 
 COPY . .
 

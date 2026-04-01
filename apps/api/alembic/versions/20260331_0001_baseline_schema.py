@@ -33,7 +33,7 @@ def upgrade() -> None:
         inspector,
         "wallet_accounts",
         "reserved_balance",
-        "ALTER TABLE wallet_accounts ADD COLUMN reserved_balance NUMERIC(18,4) NOT NULL DEFAULT 0.0000",
+        "ALTER TABLE wallet_accounts ADD COLUMN reserved_balance NUMERIC(18,6) NOT NULL DEFAULT 0.000000",
     )
     _ensure_column(
         bind,
@@ -132,6 +132,20 @@ def upgrade() -> None:
         "model_catalog",
         "example_curl",
         "ALTER TABLE model_catalog ADD COLUMN example_curl TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        bind,
+        inspector,
+        "usage_logs",
+        "billing_quantity",
+        "ALTER TABLE usage_logs ADD COLUMN billing_quantity INTEGER NOT NULL DEFAULT 0",
+    )
+    _ensure_column(
+        bind,
+        inspector,
+        "usage_logs",
+        "billing_unit",
+        "ALTER TABLE usage_logs ADD COLUMN billing_unit VARCHAR(32) NOT NULL DEFAULT ''",
     )
     _ensure_column(
         bind,

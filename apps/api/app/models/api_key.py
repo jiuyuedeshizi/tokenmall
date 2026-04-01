@@ -20,10 +20,10 @@ class ApiKey(Base):
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     token_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
     request_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
-    budget_limit: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4))
+    budget_limit: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     used_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     used_requests: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    used_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0.0000"), nullable=False)
+    used_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0.000000"), nullable=False)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

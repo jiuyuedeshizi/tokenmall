@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { PlatformBrand } from "@/components/platform-brand";
-import { apiFetch, clearToken } from "@/lib/api";
+import { apiFetch, clearToken, setToken } from "@/lib/api";
 import type { UserInfo } from "@/types";
 
 function OverviewIcon({ active }: { active: boolean }) {
@@ -119,17 +119,30 @@ export function DashboardShell({
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileName, setProfileName] = useState(user.name);
+  const [profileEmail, setProfileEmail] = useState(user.email ?? "");
+  const [emailVerificationCode, setEmailVerificationCode] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [notice, setNotice] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [sendingEmailVerification, setSendingEmailVerification] = useState(false);
+  const [verifyingEmail, setVerifyingEmail] = useState(false);
+  const [emailVerificationCooldown, setEmailVerificationCooldown] = useState(0);
+  const [emailVerificationDemoCode, setEmailVerificationDemoCode] = useState("");
 
   useEffect(() => {
     setCurrentUser(user);
     setProfileName(user.name);
+    setProfileEmail(user.email ?? "");
   }, [user]);
+
+  useEffect(() => {
+    if (!currentUser.profile_completed) {
+      setSettingsOpen(true);
+    }
+  }, [currentUser.profile_completed]);
 
   useEffect(() => {
     if (!notice) {
@@ -138,6 +151,16 @@ export function DashboardShell({
     const timer = window.setTimeout(() => setNotice(""), 2200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (emailVerificationCooldown <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setEmailVerificationCooldown((value) => (value > 0 ? value - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [emailVerificationCooldown]);
 
   async function handleProfileSave() {
     setSavingProfile(true);
@@ -165,20 +188,100 @@ export function DashboardShell({
       await apiFetch("/auth/change-password", {
         method: "POST",
         body: JSON.stringify({
-          current_password: currentPassword,
+          current_password: currentUser.has_password ? currentPassword : undefined,
           new_password: newPassword,
         }),
       });
+      const refreshed = await apiFetch<UserInfo>("/auth/me");
+      setCurrentUser(refreshed);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setNotice("密码已修改");
+      setNotice(currentUser.has_password ? "密码已修改" : "登录密码已设置");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "修改密码失败");
     } finally {
       setSavingPassword(false);
     }
   }
+
+  async function handleSendEmailVerificationCode() {
+    if (!profileEmail.trim()) {
+      setNotice("请输入邮箱");
+      return;
+    }
+    setSendingEmailVerification(true);
+    try {
+      const result = await apiFetch<{
+        demo_code?: string;
+        message?: string;
+        cooldown_seconds?: number;
+      }>("/auth/send-email-verification-code", {
+        method: "POST",
+        body: JSON.stringify({ email: profileEmail }),
+      });
+      setEmailVerificationDemoCode(result.demo_code ?? "");
+      setEmailVerificationCooldown(result.cooldown_seconds ?? 60);
+      setNotice(result.message ?? "验证邮件已发送，请查收");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "验证码发送失败");
+    } finally {
+      setSendingEmailVerification(false);
+    }
+  }
+
+  async function handleVerifyEmail() {
+    if (!emailVerificationCode.trim()) {
+      setNotice("请输入邮箱验证码");
+      return;
+    }
+    setVerifyingEmail(true);
+    try {
+      const result = await apiFetch<{ access_token: string }>("/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ email: profileEmail, code: emailVerificationCode }),
+      });
+      setToken(result.access_token);
+      const refreshed = await apiFetch<UserInfo>("/auth/me", {}, result.access_token);
+      setCurrentUser(refreshed);
+      setProfileEmail(refreshed.email ?? "");
+      setEmailVerificationCode("");
+      setEmailVerificationDemoCode("");
+      setNotice("邮箱已绑定，可用于邮箱登录");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "邮箱激活失败");
+    } finally {
+      setVerifyingEmail(false);
+    }
+  }
+
+  async function handleCloseSettings() {
+    if (!mustCompleteProfile) {
+      setSettingsOpen(false);
+      return;
+    }
+
+    try {
+      const refreshed = await apiFetch<UserInfo>("/auth/me");
+      setCurrentUser(refreshed);
+      setProfileName(refreshed.name);
+      setProfileEmail(refreshed.email ?? "");
+      if (refreshed.profile_completed) {
+        setSettingsOpen(false);
+        return;
+      }
+    } catch {
+      setNotice("资料状态刷新失败，请稍后重试");
+      return;
+    }
+
+    setNotice("还有资料未完成，请先完成后再关闭");
+  }
+
+  const mustCompleteProfile = !currentUser.profile_completed;
+  const profileChecklist = [
+    currentUser.has_password ? "密码已设置" : "设置登录密码",
+  ];
 
   return (
     <div className="min-h-screen bg-[#f7f9fc] text-[var(--text-main)]">
@@ -290,7 +393,7 @@ export function DashboardShell({
               </div>
               <button
                 className="text-[30px] leading-none text-[#98a2b3]"
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => void handleCloseSettings()}
                 type="button"
               >
                 ×
@@ -300,11 +403,68 @@ export function DashboardShell({
             <div className="grid gap-6 px-8 py-7 md:grid-cols-2">
               <section className="flex h-full flex-col rounded-[24px] border border-[#e5eaf3] bg-[#fcfdff] p-6">
                 <h3 className="text-[18px] font-semibold text-[#172033]">个人信息</h3>
+                {mustCompleteProfile ? (
+                  <div className="mt-4 rounded-[18px] border border-[#ffe2b8] bg-[#fff8ee] px-4 py-3 text-[13px] leading-6 text-[#9a6700]">
+                    首次短信登录已自动创建账号。设置登录密码后即可关闭；邮箱绑定现在是可选项，后续可随时补充用于邮箱登录和找回账号。
+                    <div className="mt-2 text-[12px] text-[#b54708]">
+                      当前还需要完成：{profileChecklist.join(" / ")}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="mt-5 space-y-4">
                   <div className="rounded-[18px] bg-[#f8fafc] p-5">
                     <div className="text-[13px] text-[#98a2b3]">邮箱</div>
-                    <div className="mt-1 text-[15px] font-semibold text-[#172033]">{currentUser.email}</div>
+                    <input
+                      className="mt-2 h-[48px] w-full rounded-[16px] border border-[#dbe3ef] bg-white px-4 text-[15px] text-[#172033] outline-none"
+                      onChange={(event) => setProfileEmail(event.target.value)}
+                      placeholder="请输入常用邮箱，用于邮箱登录和账号找回"
+                      value={profileEmail}
+                    />
+                    <div className={`mt-2 inline-flex rounded-full px-3 py-1 text-[12px] font-semibold ${
+                      currentUser.email && currentUser.email_verified ? "bg-[#e8f7ee] text-[#067647]" : "bg-[#fff4e5] text-[#b54708]"
+                    }`}>
+                      {currentUser.email && currentUser.email_verified ? "已激活" : "未绑定或未激活"}
+                    </div>
                   </div>
+                  {(!currentUser.email || !currentUser.email_verified || profileEmail !== (currentUser.email ?? "")) ? (
+                    <div className="rounded-[18px] border border-[#e5eaf3] bg-white p-5">
+                      <div className="text-[14px] font-semibold text-[#172033]">绑定并激活邮箱</div>
+                      <p className="mt-2 text-[13px] leading-6 text-[#667085]">
+                        验证成功后可直接使用邮箱验证码登录。如果该邮箱下已有旧账号，系统会在验证成功后自动合并到同一账号。
+                      </p>
+                      <div className="mt-4 flex items-center gap-3">
+                        <input
+                          className="h-[46px] min-w-0 flex-1 rounded-[16px] border border-[#dbe3ef] px-4 text-[14px] text-[#172033] outline-none"
+                          onChange={(event) => setEmailVerificationCode(event.target.value)}
+                          placeholder="请输入邮箱验证码"
+                          value={emailVerificationCode}
+                        />
+                        <button
+                          className="flex h-[46px] min-w-[124px] items-center justify-center rounded-[16px] border border-[#dbe3ef] px-4 text-[14px] font-semibold text-[#315efb] disabled:opacity-60"
+                          disabled={sendingEmailVerification || emailVerificationCooldown > 0}
+                          onClick={() => void handleSendEmailVerificationCode()}
+                          type="button"
+                        >
+                          {sendingEmailVerification
+                            ? "发送中..."
+                            : emailVerificationCooldown > 0
+                              ? `${emailVerificationCooldown}s 后重试`
+                              : "发送验证码"}
+                        </button>
+                      </div>
+                      {emailVerificationDemoCode ? (
+                        <div className="mt-3 text-[13px] text-[#315efb]">演示验证码：{emailVerificationDemoCode}</div>
+                      ) : null}
+                      <button
+                        className="mt-4 rounded-[14px] bg-[#315efb] px-4 py-2 text-[14px] font-semibold text-white disabled:opacity-60"
+                        disabled={verifyingEmail}
+                        onClick={() => void handleVerifyEmail()}
+                        type="button"
+                      >
+                        {verifyingEmail ? "激活中..." : "确认激活"}
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="rounded-[18px] bg-[#f8fafc] p-5">
                     <div className="text-[13px] text-[#98a2b3]">角色</div>
                     <div className="mt-1 text-[15px] font-semibold text-[#172033]">
@@ -333,17 +493,23 @@ export function DashboardShell({
               </section>
 
               <section className="flex h-full flex-col rounded-[24px] border border-[#e5eaf3] bg-[#fcfdff] p-6">
-                <h3 className="text-[18px] font-semibold text-[#172033]">修改密码</h3>
+                <h3 className="text-[18px] font-semibold text-[#172033]">{currentUser.has_password ? "修改密码" : "设置登录密码"}</h3>
                 <div className="mt-5 space-y-4">
-                  <label className="block">
-                    <div className="mb-2 text-[14px] font-medium text-[#4d596a]">当前密码</div>
-                    <input
-                      className="h-[50px] w-full rounded-[18px] border border-[#dbe3ef] px-4 text-[15px] text-[#172033] outline-none"
-                      onChange={(event) => setCurrentPassword(event.target.value)}
-                      type="password"
-                      value={currentPassword}
-                    />
-                  </label>
+                  {currentUser.has_password ? (
+                    <label className="block">
+                      <div className="mb-2 text-[14px] font-medium text-[#4d596a]">当前密码</div>
+                      <input
+                        className="h-[50px] w-full rounded-[18px] border border-[#dbe3ef] px-4 text-[15px] text-[#172033] outline-none"
+                        onChange={(event) => setCurrentPassword(event.target.value)}
+                        type="password"
+                        value={currentPassword}
+                      />
+                    </label>
+                  ) : (
+                    <div className="rounded-[18px] border border-[#dbe3ef] bg-white px-4 py-3 text-[13px] leading-6 text-[#667085]">
+                      你当前是短信自动创建的账号，还没有密码。设置后即可使用“邮箱/手机号 + 密码”登录。
+                    </div>
+                  )}
                   <label className="block">
                     <div className="mb-2 text-[14px] font-medium text-[#4d596a]">新密码</div>
                     <input
@@ -370,7 +536,7 @@ export function DashboardShell({
                     onClick={() => void handlePasswordChange()}
                     type="button"
                   >
-                    {savingPassword ? "提交中..." : "修改密码"}
+                    {savingPassword ? "提交中..." : currentUser.has_password ? "修改密码" : "设置密码"}
                   </button>
                 </div>
               </section>

@@ -3,11 +3,22 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { apiFetch, setToken } from "@/lib/api";
 
-type LoginTab = "password" | "phone";
+type LoginTab = "password" | "phone" | "email";
+const LOGIN_TABS: Array<{ key: LoginTab; label: string }> = [
+  { key: "password", label: "密码登录" },
+  { key: "phone", label: "手机验证码登录" },
+  { key: "email", label: "邮箱验证码登录" },
+];
+
+type CodeSendResult = {
+  demo_code?: string;
+  message?: string;
+  cooldown_seconds?: number;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,12 +26,32 @@ export default function LoginPage() {
   const [identifier, setIdentifier] = useState("admin@tokenmall.dev");
   const [password, setPassword] = useState("Admin123456");
   const [phone, setPhone] = useState("13800000000");
-  const [code, setCode] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [email, setEmail] = useState("admin@tokenmall.dev");
+  const [emailCode, setEmailCode] = useState("");
   const [agreed, setAgreed] = useState(true);
-  const [demoCode, setDemoCode] = useState("");
+  const [phoneDemoCode, setPhoneDemoCode] = useState("");
+  const [emailDemoCode, setEmailDemoCode] = useState("");
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [sendingCode, setSendingCode] = useState(false);
+  const [sendingPhoneCode, setSendingPhoneCode] = useState(false);
+  const [sendingEmailCode, setSendingEmailCode] = useState(false);
+  const [phoneCooldown, setPhoneCooldown] = useState(0);
+  const [emailCooldown, setEmailCooldown] = useState(0);
+
+  useEffect(() => {
+    if (phoneCooldown <= 0 && emailCooldown <= 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setPhoneCooldown((value) => (value > 0 ? value - 1 : 0));
+      setEmailCooldown((value) => (value > 0 ? value - 1 : 0));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [phoneCooldown, emailCooldown]);
 
   async function handlePasswordLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,18 +80,21 @@ export default function LoginPage() {
       setError("请输入手机号");
       return;
     }
-    setSendingCode(true);
+    setSendingPhoneCode(true);
     setError("");
+    setNotice("");
     try {
-      const result = await apiFetch<{ demo_code?: string }>("/auth/send-phone-code", {
+      const result = await apiFetch<CodeSendResult>("/auth/send-phone-code", {
         method: "POST",
         body: JSON.stringify({ phone }),
       });
-      setDemoCode(result.demo_code ?? "");
+      setPhoneDemoCode(result.demo_code ?? "");
+      setPhoneCooldown(result.cooldown_seconds ?? 60);
+      setNotice(result.message ?? "验证码已发送，请查收");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "验证码发送失败");
     } finally {
-      setSendingCode(false);
+      setSendingPhoneCode(false);
     }
   }
 
@@ -75,7 +109,52 @@ export default function LoginPage() {
     try {
       const result = await apiFetch<{ access_token: string }>("/auth/login-phone", {
         method: "POST",
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify({ phone, code: phoneCode }),
+      });
+      setToken(result.access_token);
+      router.replace("/overview");
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "登录失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSendEmailCode() {
+    if (!email.trim()) {
+      setError("请输入邮箱");
+      return;
+    }
+    setSendingEmailCode(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiFetch<CodeSendResult>("/auth/send-email-code", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setEmailDemoCode(result.demo_code ?? "");
+      setEmailCooldown(result.cooldown_seconds ?? 60);
+      setNotice(result.message ?? "验证码已发送，请查收");
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "验证码发送失败");
+    } finally {
+      setSendingEmailCode(false);
+    }
+  }
+
+  async function handleEmailLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!agreed) {
+      setError("请先阅读并同意用户协议与隐私政策");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await apiFetch<{ access_token: string }>("/auth/login-email", {
+        method: "POST",
+        body: JSON.stringify({ email, code: emailCode }),
       });
       setToken(result.access_token);
       router.replace("/overview");
@@ -89,53 +168,27 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#f6f8fc] text-[#172033]">
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="relative hidden overflow-hidden border-r border-[#e8edf5] bg-[linear-gradient(180deg,#fbfdff_0%,#f4f8ff_100%)] lg:block">
-          <div className="absolute inset-y-0 right-0 w-px bg-[#e6edf8]" />
-          <div className="absolute right-0 top-0 h-[240px] w-[360px] border-l-[3px] border-b-[3px] border-[#4f87ef] [clip-path:polygon(42%_0,100%_0,100%_100%,0_56%,0_0)]" />
-          <div className="absolute right-0 top-0 h-[330px] w-[380px] bg-[linear-gradient(145deg,#ff972f_0%,#ff972f_45%,#5489f1_45%,#5489f1_100%)] [clip-path:polygon(54%_0,100%_0,100%_100%,20%_59%,20%_0)]" />
-          <div className="absolute -bottom-9 -left-14 h-[215px] w-[215px] rounded-[74px] border-[3px] border-[#5d93f5] bg-[#d7e5ff]" />
-          <div className="absolute bottom-[90px] left-[-24px] h-[228px] w-[228px] rounded-[74px] border-[3px] border-[#5d93f5]" />
-
-          <div className="relative flex h-full flex-col px-[11%] py-[8%]">
-            <Image alt="EAGET" className="h-auto w-[208px]" height={50} priority src="/eaget-logo.svg" width={208} />
-
-            <div className="mt-auto pb-[12%]">
-              <div className="max-w-[370px] text-[62px] font-black leading-[0.95] tracking-[-0.06em] text-[#101828]">
-                <div>Intelligence</div>
-                <div className="mt-1">with every</div>
-                <div className="mt-1">
-                  customer
-                  <span className="ml-3 inline-block h-7 w-7 rounded-full bg-[#ff9a2f] align-middle" />
-                </div>
-              </div>
-
-              <p className="mt-8 max-w-[430px] text-[17px] leading-8 text-[#65758d]">
-                管理模型、密钥、计费、充值与后台运营，统一构建你的 AI 开放平台业务能力。
-              </p>
-
-              <div className="mt-8 flex max-w-[430px] flex-wrap gap-x-5 gap-y-2 text-[14px] font-medium text-[#738198]">
-                <span>模型管理</span>
-                <span>API 密钥</span>
-                <span>余额计费</span>
-                <span>运营后台</span>
-              </div>
+        <section className="hidden border-r border-[#e8edf5] bg-[linear-gradient(180deg,#fbfdff_0%,#f4f8ff_100%)] lg:block">
+          <div className="px-12 pt-20">
+            <div className="flex h-[180px] w-[360px] items-center justify-center">
+              <Image alt="忆捷EAGET" className="h-auto w-[240px]" height={64} priority src="/logo.jpg" width={240} />
             </div>
           </div>
         </section>
 
         <section className="flex items-center justify-center bg-white px-6 py-10 lg:px-12">
-          <div className="w-full max-w-[520px]">
+          <div className="w-full max-w-[560px]">
             <div className="mb-12 flex items-center gap-5">
-              <Image alt="EAGET" className="h-auto w-[168px]" height={40} priority src="/eaget-logo.svg" width={168} />
+              <div className="text-[42px] font-black italic leading-none tracking-[-0.05em] text-[#127DCA]">
+                {/* <span className="mr-1 not-italic tracking-[-0.04em]">忆捷EAGET</span> */}
+                <span>忆捷EAGET</span>
+              </div>
               <div className="h-8 w-px bg-[#dde4ef]" />
               <div className="text-[17px] font-semibold text-[#172033]">开放平台账户登录</div>
             </div>
 
             <div className="mb-8 flex gap-10 border-b border-[#eef2f7] text-[17px] font-medium">
-              {[
-                { key: "password", label: "密码登录" },
-                { key: "phone", label: "手机验证码登录" },
-              ].map((item) => {
+              {LOGIN_TABS.map((item) => {
                 const active = tab === item.key;
                 return (
                   <button
@@ -144,8 +197,11 @@ export default function LoginPage() {
                       active ? "text-[#315efb]" : "text-[#5b6678] hover:text-[#172033]"
                     }`}
                     onClick={() => {
-                      setTab(item.key as LoginTab);
+                      setTab(item.key);
                       setError("");
+                      setNotice("");
+                      setPhoneDemoCode("");
+                      setEmailDemoCode("");
                     }}
                     type="button"
                   >
@@ -171,6 +227,7 @@ export default function LoginPage() {
                   type="password"
                   value={password}
                 />
+                {notice ? <p className="text-[14px] text-[#315efb]">{notice}</p> : null}
                 <PolicyCheckbox agreed={agreed} setAgreed={setAgreed} />
                 {error ? <p className="text-[14px] text-[#ef4444]">{error}</p> : null}
                 <button
@@ -182,13 +239,9 @@ export default function LoginPage() {
                 </button>
                 <div className="flex items-center justify-between text-[15px] text-[#172033]">
                   <span className="cursor-pointer hover:text-[#315efb]">忘记密码</span>
-                  <div className="flex items-center gap-6">
-                    <span>邮箱验证码登录</span>
-                    <span>子账号登录</span>
-                  </div>
                 </div>
               </form>
-            ) : (
+            ) : tab === "phone" ? (
               <form className="space-y-6" onSubmit={handlePhoneLogin}>
                 <input
                   className="h-[64px] w-full rounded-[16px] border border-[#e4e9f2] bg-[#f7f9fc] px-7 text-[18px] text-[#172033] outline-none transition placeholder:text-[#b7c1cf] focus:border-[#c9d8f9] focus:bg-white focus:shadow-[0_0_0_4px_rgba(49,94,251,0.05)]"
@@ -199,20 +252,57 @@ export default function LoginPage() {
                 <div className="grid grid-cols-[1fr_auto] gap-4">
                   <input
                     className="h-[64px] rounded-[16px] border border-[#e4e9f2] bg-[#f7f9fc] px-7 text-[18px] text-[#172033] outline-none transition placeholder:text-[#b7c1cf] focus:border-[#c9d8f9] focus:bg-white focus:shadow-[0_0_0_4px_rgba(49,94,251,0.05)]"
-                    onChange={(event) => setCode(event.target.value)}
+                    onChange={(event) => setPhoneCode(event.target.value)}
                     placeholder="请输入短信验证码"
-                    value={code}
+                    value={phoneCode}
                   />
                   <button
                     className="h-[64px] rounded-[16px] border border-[#dbe3ef] px-6 text-[16px] font-semibold text-[#315efb] transition hover:bg-[#f4f8ff] disabled:opacity-60"
-                    disabled={sendingCode}
+                    disabled={sendingPhoneCode || phoneCooldown > 0}
                     onClick={handleSendCode}
                     type="button"
                   >
-                    {sendingCode ? "发送中..." : "获取验证码"}
+                    {sendingPhoneCode ? "发送中..." : phoneCooldown > 0 ? `${phoneCooldown}s 后重试` : "获取验证码"}
                   </button>
                 </div>
-                {demoCode ? <p className="text-[14px] text-[#315efb]">演示验证码：{demoCode}</p> : null}
+                {phoneDemoCode ? <p className="text-[14px] text-[#315efb]">演示验证码：{phoneDemoCode}</p> : null}
+                {notice ? <p className="text-[14px] text-[#315efb]">{notice}</p> : null}
+                <PolicyCheckbox agreed={agreed} setAgreed={setAgreed} />
+                {error ? <p className="text-[14px] text-[#ef4444]">{error}</p> : null}
+                <button
+                  className="h-[62px] w-full rounded-[18px] bg-[#182136] text-[21px] font-semibold text-white transition hover:opacity-95 disabled:opacity-60"
+                  disabled={submitting}
+                  type="submit"
+                >
+                  {submitting ? "登录中..." : "立即登录"}
+                </button>
+              </form>
+            ) : (
+              <form className="space-y-6" onSubmit={handleEmailLogin}>
+                <input
+                  className="h-[64px] w-full rounded-[16px] border border-[#e4e9f2] bg-[#f7f9fc] px-7 text-[18px] text-[#172033] outline-none transition placeholder:text-[#b7c1cf] focus:border-[#c9d8f9] focus:bg-white focus:shadow-[0_0_0_4px_rgba(49,94,251,0.05)]"
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="请输入邮箱"
+                  value={email}
+                />
+                <div className="grid grid-cols-[1fr_auto] gap-4">
+                  <input
+                    className="h-[64px] rounded-[16px] border border-[#e4e9f2] bg-[#f7f9fc] px-7 text-[18px] text-[#172033] outline-none transition placeholder:text-[#b7c1cf] focus:border-[#c9d8f9] focus:bg-white focus:shadow-[0_0_0_4px_rgba(49,94,251,0.05)]"
+                    onChange={(event) => setEmailCode(event.target.value)}
+                    placeholder="请输入邮箱验证码"
+                    value={emailCode}
+                  />
+                  <button
+                    className="h-[64px] rounded-[16px] border border-[#dbe3ef] px-6 text-[16px] font-semibold text-[#315efb] transition hover:bg-[#f4f8ff] disabled:opacity-60"
+                    disabled={sendingEmailCode || emailCooldown > 0}
+                    onClick={handleSendEmailCode}
+                    type="button"
+                  >
+                    {sendingEmailCode ? "发送中..." : emailCooldown > 0 ? `${emailCooldown}s 后重试` : "获取验证码"}
+                  </button>
+                </div>
+                {emailDemoCode ? <p className="text-[14px] text-[#315efb]">演示验证码：{emailDemoCode}</p> : null}
+                {notice ? <p className="text-[14px] text-[#315efb]">{notice}</p> : null}
                 <PolicyCheckbox agreed={agreed} setAgreed={setAgreed} />
                 {error ? <p className="text-[14px] text-[#ef4444]">{error}</p> : null}
                 <button

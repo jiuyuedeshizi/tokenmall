@@ -165,59 +165,61 @@ export default function ModelsPage() {
           {visibleItems.map((item) => (
             <article
               key={item.model_code}
-              className="rounded-[24px] border border-[#dbe3ef] bg-white p-7 shadow-[0_16px_45px_rgba(15,23,42,0.05)]"
+              className="flex h-full flex-col rounded-[24px] border border-[#dbe3ef] bg-white p-7 shadow-[0_16px_45px_rgba(15,23,42,0.05)]"
             >
-              <div className="flex items-start justify-between gap-4">
-                <ModelIcon />
-                <div className="flex items-center gap-2 text-[16px] font-semibold text-[#172033]">
-                  <span className="text-[#f5b90b]">★</span>
-                  {item.rating.toFixed(1)}
+              <div className="flex flex-1 flex-col">
+                <div className="flex items-start justify-between gap-4">
+                  <ModelIcon />
+                  <div className="flex items-center gap-2 text-[16px] font-semibold text-[#172033]">
+                    <span className="text-[#f5b90b]">★</span>
+                    {item.rating.toFixed(1)}
+                  </div>
                 </div>
-              </div>
 
-              <h3 className="mt-7 text-[24px] font-semibold text-[#172033]">{item.display_name}</h3>
-              <div className="mt-2 text-[16px] text-[#667085]">by {item.vendor_display_name}</div>
-              {item.supports_multimodal_chat ? (
-                <div className="mt-3">
-                  <MultimodalBadge />
+                <h3 className="mt-7 text-[24px] font-semibold text-[#172033]">{item.display_name}</h3>
+                <div className="mt-2 text-[16px] text-[#667085]">by {item.vendor_display_name}</div>
+                {item.supports_multimodal_chat ? (
+                  <div className="mt-3">
+                    <MultimodalBadge />
+                  </div>
+                ) : null}
+                <p className="mt-5 min-h-[78px] text-[16px] leading-8 text-[#4d596a]">
+                  {item.description}
+                </p>
+
+                <div className="mt-5">
+                  <div className="text-[14px] font-semibold text-[#667085]">{formatBillingMode(item.billing_mode)}</div>
+                  <div className="mt-2 space-y-2 text-[17px] font-semibold">
+                    {renderPricingSummary(item.pricing_items).slice(0, 3).map((line, index) => (
+                      <div key={`${item.model_code}-${index}`} className={index === 0 ? "text-[#315efb]" : "text-[#16a34a]"}>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ) : null}
-              <p className="mt-5 min-h-[78px] text-[16px] leading-8 text-[#4d596a]">
-                {item.description}
-              </p>
 
-              <div className="mt-5">
-                <div className="text-[14px] font-semibold text-[#667085]">{formatBillingMode(item.billing_mode)}</div>
-                <div className="mt-2 space-y-2 text-[17px] font-semibold">
-                  {renderPricingSummary(item.pricing_items).slice(0, 3).map((line, index) => (
-                    <div key={`${item.model_code}-${index}`} className={index === 0 ? "text-[#315efb]" : "text-[#16a34a]"}>
-                      {line}
-                    </div>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {item.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full bg-[#f3f5f9] px-3 py-1 text-[14px] text-[#4d596a]"
+                    >
+                      {tag}
+                    </span>
                   ))}
                 </div>
               </div>
 
-              <div className="mt-5 flex flex-wrap gap-2">
-                {item.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-[#f3f5f9] px-3 py-1 text-[14px] text-[#4d596a]"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-
-              <div className="mt-7">
+              <div className="mt-7 border-t border-[#eef2f7] pt-5">
                 <Link
                   className="flex h-[52px] w-full items-center justify-center rounded-[16px] bg-[#315efb] text-[18px] font-semibold text-white"
                   href={`/models/item/${item.id}`}
                 >
                   开始使用
                 </Link>
-              </div>
 
-              <div className="mt-4 text-[14px] text-[#98a2b3]">{categoryLabel(item.category)}</div>
+                <div className="mt-4 text-[14px] text-[#98a2b3]">{categoryLabel(item.category)}</div>
+              </div>
             </article>
           ))}
         </div>

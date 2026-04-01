@@ -7,14 +7,22 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.models import PaymentOrder, UsageLog, WalletAccount
+from app.models import ModelCatalog, PaymentOrder, UsageLog, WalletAccount
 from app.schemas.dashboard import DashboardSummary
+from app.services.billing_usage import infer_billing_quantity, resolve_billing_unit
 
 router = APIRouter()
 
 
 @router.get("/summary", response_model=DashboardSummary)
 def get_summary(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    model_meta_map = {
+        row.model_code: {
+            "billing_mode": row.billing_mode,
+            "pricing_items": row.pricing_items,
+        }
+        for row in db.query(ModelCatalog.model_code, ModelCatalog.billing_mode, ModelCatalog.pricing_items).all()
+    }
     usages = (
         db.query(UsageLog)
         .filter(UsageLog.user_id == current_user.id)
@@ -44,7 +52,16 @@ def get_summary(current_user=Depends(get_current_user), db: Session = Depends(ge
             "time": item.created_at.strftime("%H:%M"),
             "title": "API调用" if item.status == "success" else "调用失败",
             "subtitle": item.model_code,
-            "tokens": item.total_tokens,
+            "status": item.status,
+            "billing_quantity": infer_billing_quantity(
+                total_tokens=item.total_tokens,
+                billing_mode=model_meta_map.get(item.model_code, {}).get("billing_mode", "token"),
+                billing_quantity=getattr(item, "billing_quantity", 0),
+                amount=Decimal(item.amount),
+                pricing_items=model_meta_map.get(item.model_code, {}).get("pricing_items"),
+            ),
+            "billing_unit": getattr(item, "billing_unit", "") or resolve_billing_unit(model_meta_map.get(item.model_code, {}).get("billing_mode", "token")),
+            "billing_mode": model_meta_map.get(item.model_code, {}).get("billing_mode", "token"),
             "amount": item.amount,
         }
         for item in usages[:6]
@@ -54,7 +71,10 @@ def get_summary(current_user=Depends(get_current_user), db: Session = Depends(ge
             "time": (item.paid_at or item.created_at).strftime("%H:%M"),
             "title": "余额充值",
             "subtitle": item.payment_method,
-            "tokens": 0,
+            "status": "success",
+            "billing_quantity": 0,
+            "billing_unit": "token",
+            "billing_mode": "token",
             "amount": item.amount,
         }
         for item in paid_orders[:6]
@@ -64,7 +84,10 @@ def get_summary(current_user=Depends(get_current_user), db: Session = Depends(ge
             "time": item["time"],
             "title": item["title"],
             "subtitle": item["subtitle"],
-            "tokens": item["tokens"],
+            "status": item["status"],
+            "billing_quantity": item["billing_quantity"],
+            "billing_unit": item["billing_unit"],
+            "billing_mode": item["billing_mode"],
             "amount": item["amount"],
         }
         for item in sorted(recent_activities, key=lambda entry: entry["sort_time"], reverse=True)[:6]
@@ -91,7 +114,7 @@ def get_summary(current_user=Depends(get_current_user), db: Session = Depends(ge
 
     return DashboardSummary(
         total_requests=total_requests,
-        month_spend=month_spend.quantize(Decimal("0.0001")),
+        month_spend=month_spend.quantize(Decimal("0.000001")),
         token_balance=Decimal(wallet.balance if wallet else 0),
         success_rate=success_rate,
         recent_activities=recent_activities,

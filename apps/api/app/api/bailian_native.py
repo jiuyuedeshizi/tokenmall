@@ -51,6 +51,10 @@ def _extract_bailian_usage(response_payload: dict, model, payload: dict) -> dict
     if image_usage:
         return image_usage
 
+    usage = response_payload.get("usage")
+    if isinstance(usage, dict):
+        return usage
+
     billing_mode = (getattr(model, "billing_mode", None) or "token").strip().lower()
     if billing_mode == "per_image":
         return {"image_count": 1}
@@ -58,8 +62,7 @@ def _extract_bailian_usage(response_payload: dict, model, payload: dict) -> dict
         input_payload = payload.get("input")
         if isinstance(input_payload, dict) and isinstance(input_payload.get("text"), str):
             return {"char_count": len(input_payload["text"])}
-    usage = response_payload.get("usage")
-    return usage if isinstance(usage, dict) else {}
+    return {}
 
 
 def _extract_video_usage_from_payload(payload: dict) -> dict:
@@ -370,6 +373,23 @@ async def bailian_video_synthesis(
             )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="上游响应缺少可结算 usage") from exc
     return proxy_response
+
+
+@router.post("/api/v1/services/audio/tts/customization")
+async def bailian_tts_customization(
+    request: Request,
+    api_key=Depends(get_api_key_entity_async),
+    db: AsyncSession = Depends(get_async_db),
+):
+    await _resolve_request_identity(api_key, db)
+    provider_config = get_bailian_provider_config()
+    provider_url = f"{provider_config.native_api_base.rstrip('/')}/services/audio/tts/customization"
+    return await forward_request(
+        request=request,
+        provider_url=provider_url,
+        api_key=provider_config.api_key,
+        provider_headers=provider_config.headers,
+    )
 
 
 @router.get("/api/v1/tasks/{task_id}")

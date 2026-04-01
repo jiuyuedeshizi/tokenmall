@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Panel } from "@/components/panel";
 import { apiFetch } from "@/lib/api";
+import { formatBillingAmount, formatBillingQuantity } from "@/lib/billing-display";
 import type { UsageHistoryResponse, UsageLog } from "@/types";
 
 const timeOptions = [
@@ -476,7 +477,7 @@ export default function UsagePage() {
                     {item.title ?? `${item.model_code} 的 API 请求已完成`}
                   </div>
                   <div className="mt-1 truncate text-[14px] text-[#667085]">
-                    {item.subtitle ?? `${item.model_code} · ${item.total_tokens.toLocaleString()} tokens · ¥${item.amount}`}
+                    {item.subtitle ?? `${item.model_code} · ${formatBillingQuantity(item)} · ${formatBillingAmount(item.amount, item.status) === "-" ? "-" : `¥${formatBillingAmount(item.amount, item.status)}`}`}
                   </div>
                 </div>
               </div>

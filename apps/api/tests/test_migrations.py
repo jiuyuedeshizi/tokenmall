@@ -27,6 +27,12 @@ def test_alembic_upgrade_head_on_empty_database(tmp_path: Path):
     assert "wallet_ledger" in tables
     assert "usage_reservations" in tables
     assert "payment_orders" in tables
+    assert "verification_codes" in tables
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    assert "email_verified" in user_columns
+    assert "email_verified_at" in user_columns
+    email_column = next(column for column in inspector.get_columns("users") if column["name"] == "email")
+    assert email_column["nullable"] is True
 
 
 def test_alembic_upgrade_head_deduplicates_wallet_ledger(tmp_path: Path):

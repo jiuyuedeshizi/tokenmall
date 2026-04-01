@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import ApiKey, UsageLog, UsageReservation, User
+from app.services.billing_usage import resolve_billing_unit
 from app.services.http_client import get_proxy_http_client
 from app.services.observability import increment_metric, log_event, metrics_timer
 from app.services.pricing import calculate_usage_cost
@@ -170,12 +171,12 @@ def estimate_reserved_amount(model, payload: dict) -> tuple[int, int, Decimal]:
             except (TypeError, ValueError):
                 image_count = 1
         estimated_amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
-        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.000001"))
         return 0, image_count, reserved_amount
     if billing_mode == "per_10k_chars":
         estimated_chars = estimate_character_count(payload)
         estimated_amount = calculate_usage_cost(model, 0, 0, char_count=estimated_chars)
-        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.000001"))
         return estimated_chars, 0, reserved_amount
     if billing_mode == "per_second":
         estimated_seconds = estimate_video_seconds(payload)
@@ -187,12 +188,12 @@ def estimate_reserved_amount(model, payload: dict) -> tuple[int, int, Decimal]:
             resolution=estimate_video_resolution(payload),
             audio=estimate_video_audio_enabled(payload),
         )
-        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+        reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.000001"))
         return estimated_seconds, 0, reserved_amount
     estimated_input_tokens = estimate_prompt_tokens(payload)
     estimated_output_tokens = int(payload.get("max_tokens") or DEFAULT_MAX_OUTPUT_TOKENS)
     estimated_amount = calculate_usage_cost(model, estimated_input_tokens, estimated_output_tokens)
-    reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.0001"))
+    reserved_amount = (estimated_amount * RESERVE_BUFFER_MULTIPLIER).quantize(Decimal("0.000001"))
     return estimated_input_tokens, estimated_output_tokens, reserved_amount
 
 
@@ -292,6 +293,18 @@ async def _record_proxy_error_async(
     await db.commit()
 
 
+def _resolve_usage_second_count(usage: dict) -> int:
+    return int(
+        usage.get("second_count", usage.get("seconds", 0)) or 0
+    )
+
+
+def _resolve_usage_char_count(usage: dict) -> int:
+    return int(
+        usage.get("char_count", usage.get("characters", 0)) or 0
+    )
+
+
 def _finalize_success(
     *,
     api_key: ApiKey,
@@ -305,23 +318,27 @@ def _finalize_success(
     db: Session,
 ) -> None:
     billing_mode = (model.billing_mode or "token").strip().lower()
+    billing_unit = resolve_billing_unit(model.billing_mode)
     if billing_mode == "per_image":
         image_count = int(usage.get("image_count", 1) or 1)
-        prompt_tokens = 0
+        prompt_tokens = image_count
         completion_tokens = 0
-        total_tokens = 0
+        total_tokens = image_count
+        billing_quantity = image_count
         amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
     elif billing_mode == "per_10k_chars":
-        char_count = int(usage.get("char_count", 0) or 0)
+        char_count = _resolve_usage_char_count(usage)
         prompt_tokens = char_count
         completion_tokens = 0
         total_tokens = char_count
+        billing_quantity = char_count
         amount = calculate_usage_cost(model, 0, 0, char_count=char_count)
     elif billing_mode == "per_second":
-        second_count = int(usage.get("second_count", 0) or 0)
+        second_count = _resolve_usage_second_count(usage)
         prompt_tokens = second_count
         completion_tokens = 0
         total_tokens = second_count
+        billing_quantity = second_count
         amount = calculate_usage_cost(
             model,
             0,
@@ -334,6 +351,7 @@ def _finalize_success(
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))
         total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+        billing_quantity = total_tokens
         amount = calculate_usage_cost(model, prompt_tokens, completion_tokens)
     api_key.used_tokens += total_tokens
     api_key.used_requests += 1
@@ -365,6 +383,8 @@ def _finalize_success(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             total_tokens=total_tokens,
+            billing_quantity=billing_quantity,
+            billing_unit=billing_unit,
             amount=amount,
             billing_source=billing_source,
             response_time_ms=response_time_ms,
@@ -391,23 +411,27 @@ async def _finalize_success_async(
         await db.execute(select(ApiKey).where(ApiKey.id == api_key.id).with_for_update())
     ).scalar_one()
     billing_mode = (model.billing_mode or "token").strip().lower()
+    billing_unit = resolve_billing_unit(model.billing_mode)
     if billing_mode == "per_image":
         image_count = int(usage.get("image_count", 1) or 1)
-        prompt_tokens = 0
+        prompt_tokens = image_count
         completion_tokens = 0
-        total_tokens = 0
+        total_tokens = image_count
+        billing_quantity = image_count
         amount = calculate_usage_cost(model, 0, 0, image_count=image_count)
     elif billing_mode == "per_10k_chars":
-        char_count = int(usage.get("char_count", 0) or 0)
+        char_count = _resolve_usage_char_count(usage)
         prompt_tokens = char_count
         completion_tokens = 0
         total_tokens = char_count
+        billing_quantity = char_count
         amount = calculate_usage_cost(model, 0, 0, char_count=char_count)
     elif billing_mode == "per_second":
-        second_count = int(usage.get("second_count", 0) or 0)
+        second_count = _resolve_usage_second_count(usage)
         prompt_tokens = second_count
         completion_tokens = 0
         total_tokens = second_count
+        billing_quantity = second_count
         amount = calculate_usage_cost(
             model,
             0,
@@ -420,6 +444,7 @@ async def _finalize_success_async(
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))
         total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+        billing_quantity = total_tokens
         amount = calculate_usage_cost(model, prompt_tokens, completion_tokens)
 
     _apply_api_key_usage_limits(locked_api_key, total_tokens, amount)
@@ -454,6 +479,8 @@ async def _finalize_success_async(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             total_tokens=total_tokens,
+            billing_quantity=billing_quantity,
+            billing_unit=billing_unit,
             amount=amount,
             billing_source=billing_source,
             response_time_ms=response_time_ms,
